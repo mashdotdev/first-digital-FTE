@@ -45,7 +45,7 @@ def start(
     console.print(
         Panel.fit(
             "[bold cyan]Digital FTE Starting...[/bold cyan]\n"
-            "🤖 Your AI-powered business assistant",
+            "Your AI-powered business assistant",
             border_style="cyan",
         )
     )
@@ -74,11 +74,11 @@ async def run_orchestrator(orchestrator: Orchestrator) -> None:
     try:
         await orchestrator.initialize()
 
-        console.print("[green]✓[/green] Orchestrator initialized")
+        console.print("[green][OK][/green] Orchestrator initialized")
 
         await orchestrator.start()
 
-        console.print("[green]✓[/green] All systems running\n")
+        console.print("[green][OK][/green] All systems running\n")
         console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
         # Keep running
@@ -129,11 +129,11 @@ def status() -> None:
     config_table.add_column("Value", style="yellow")
 
     config_table.add_row("Vault Path", str(settings.vault_path))
-    config_table.add_row("Gmail Watcher", "✓ Enabled" if settings.gmail_enabled else "✗ Disabled")
-    config_table.add_row("WhatsApp Watcher", "✓ Enabled" if settings.whatsapp_enabled else "✗ Disabled")
-    config_table.add_row("Filesystem Watcher", "✓ Enabled" if settings.filesystem_enabled else "✗ Disabled")
-    config_table.add_row("Ralph Loop", "✓ Enabled" if settings.ralph_enabled else "✗ Disabled")
-    config_table.add_row("CEO Briefing", "✓ Enabled" if settings.briefing_enabled else "✗ Disabled")
+    config_table.add_row("Gmail Watcher", "[X] Enabled" if settings.gmail_enabled else "[ ] Disabled")
+    config_table.add_row("WhatsApp Watcher", "[X] Enabled" if settings.whatsapp_enabled else "[ ] Disabled")
+    config_table.add_row("Filesystem Watcher", "[X] Enabled" if settings.filesystem_enabled else "[ ] Disabled")
+    config_table.add_row("Ralph Loop", "[X] Enabled" if settings.ralph_enabled else "[ ] Disabled")
+    config_table.add_row("CEO Briefing", "[X] Enabled" if settings.briefing_enabled else "[ ] Disabled")
 
     console.print(config_table)
 
@@ -169,7 +169,7 @@ def init(
     for folder in folders:
         folder_path = vault_path / folder
         folder_path.mkdir(parents=True, exist_ok=True)
-        console.print(f"  [green]✓[/green] Created {folder}/")
+        console.print(f"  [green][OK][/green] Created {folder}/")
 
     # Create template files
     console.print("\n[cyan]Creating template files...[/cyan]")
@@ -178,19 +178,19 @@ def init(
     handbook_path = vault_path / "Company_Handbook.md"
     if not handbook_path.exists():
         handbook_path.write_text("# Company Handbook\n\nAdd your operating rules here.\n")
-        console.print(f"  [green]✓[/green] Created Company_Handbook.md")
+        console.print(f"  [green][OK][/green] Created Company_Handbook.md")
 
     # Business Goals
     goals_path = vault_path / "Business_Goals.md"
     if not goals_path.exists():
         goals_path.write_text("# Business Goals\n\nAdd your business objectives here.\n")
-        console.print(f"  [green]✓[/green] Created Business_Goals.md")
+        console.print(f"  [green][OK][/green] Created Business_Goals.md")
 
     # Dashboard
     dashboard_path = vault_path / "Dashboard.md"
     if not dashboard_path.exists():
         dashboard_path.write_text("# AI Employee Dashboard\n\n*Status: Initializing*\n")
-        console.print(f"  [green]✓[/green] Created Dashboard.md")
+        console.print(f"  [green][OK][/green] Created Dashboard.md")
 
     # Create .env template
     console.print("\n[cyan]Creating .env template...[/cyan]")
@@ -220,7 +220,7 @@ BRIEFING_ENABLED=true
 
     env_path = Path(".env.example")
     env_path.write_text(env_example)
-    console.print(f"  [green]✓[/green] Created .env.example")
+    console.print(f"  [green][OK][/green] Created .env.example")
 
     console.print("\n[bold green]Setup complete![/bold green]")
     console.print("\n[yellow]Next steps:[/yellow]")

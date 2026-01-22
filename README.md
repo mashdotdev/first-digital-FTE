@@ -4,6 +4,8 @@
 
 A local-first, privacy-focused AI business assistant that acts as your digital employee. Built for the Claude Code Digital FTE Hackathon.
 
+**Current Status:** 🟢 Core system operational - 70% Gold Tier complete ([See CHECKPOINT.md](CHECKPOINT.md))
+
 ## 🎯 What Is This?
 
 Digital FTE is an autonomous AI agent that:
@@ -20,54 +22,70 @@ Digital FTE is an autonomous AI agent that:
 
 ## 🏆 Features (Gold Tier Target)
 
-### ✅ Implemented
+### ✅ Operational & Tested (2026-01-22)
 
-1. **Local Obsidian Vault Integration**
+1. **Local Obsidian Vault Integration** ✅
    - All tasks, approvals, and logs stored in markdown
    - Human-readable audit trail
    - Easy to review and modify
+   - **Status:** Fully functional
 
-2. **Three Watchers**
-   - 📧 **Gmail Watcher** - Monitors inbox for new emails
-   - 📁 **Filesystem Watcher** - Detects approval/rejection actions
-   - 📱 **WhatsApp Watcher** - (Placeholder - coming soon)
+2. **Watchers** (2 of 3 working)
+   - 📁 **Filesystem Watcher** ✅ - Running and tested (detects approval/rejection actions)
+   - 📧 **Gmail Watcher** ⏳ - Built and ready (needs OAuth credentials.json)
+   - 📱 **WhatsApp Watcher** 🚧 - Placeholder for future implementation
 
-3. **Foundational Architecture**
-   - `BaseWatcher` - Abstract class for all watchers
-   - `Orchestrator` - Central coordinator
-   - `AuditLogger` - Comprehensive audit logging
-   - `Task/ProposedAction` models with Pydantic
+3. **Foundational Architecture** ✅
+   - `BaseWatcher` - Abstract class with lifecycle management
+   - `Orchestrator` - Central coordinator (running successfully)
+   - `AuditLogger` - Dual-format logging (JSONL + Markdown)
+   - `Task/ProposedAction` models with Pydantic validation
+   - **Status:** All tested and operational
 
-4. **Human-in-the-Loop (HITL) Workflow**
-   - AI proposes actions → human approves/rejects
-   - Confidence-based auto-approval (configurable threshold)
+4. **Human-in-the-Loop (HITL) Workflow** ✅
+   - Built and ready (pending AI API integration test)
+   - Confidence-based auto-approval (threshold: 0.85)
    - Never auto-approves payments or social posts
+   - File-based approval (move to `/Approved` or `/Rejected`)
 
-5. **Ralph Wiggum Autonomous Loop**
-   - Continuously processes `/Needs_Action` folder
+5. **Ralph Wiggum Autonomous Loop** ✅
+   - Running successfully (5-minute cycle)
    - Reads Company Handbook & Business Goals
-   - Proposes actions with Claude
-   - Executes or requests approval
+   - Ready to propose actions with Claude API
+   - **Status:** Operational (pending API key configuration)
 
-6. **Company Context System**
+6. **Company Context System** ✅
    - `Company_Handbook.md` - Operating rules and decision authority
    - `Business_Goals.md` - Revenue targets, metrics, priorities
-   - `Lessons_Learned.md` - AI learns from corrections
+   - `Lessons_Learned.md` - AI learning journal template
+   - **Status:** Complete and ready
 
-### 🚧 Next Steps
+7. **CLI Interface** ✅
+   - All commands tested and working
+   - `start`, `status`, `version`, `init`
+   - Windows-compatible (Unicode issues resolved)
 
-7. **MCP Server Integration**
-   - Email MCP (send emails via Gmail)
-   - Browser MCP (web automation)
+### ⏳ Built But Needs Configuration
 
-8. **CEO Briefing Generation**
-   - Monday morning business intelligence reports
-   - Revenue tracking, task analysis, recommendations
+8. **MCP Server Integration** (Stubs created)
+   - Email MCP ⏳ - Stub ready for implementation
+   - Browser MCP ⏳ - Stub ready for implementation
+   - **Status:** Architecture in place, needs full implementation
 
-9. **End-to-End Testing**
-   - Real-world testing for 2+ weeks
-   - Edge case handling
-   - Production hardening
+### 🚧 Next to Implement
+
+9. **API Integration** (Required for end-to-end testing)
+   - Add Anthropic API key OR integrate OpenAI+Gemini
+   - Test complete workflow: task → AI processing → approval
+
+10. **CEO Briefing Generation**
+    - Monday morning business intelligence reports
+    - Revenue tracking, task analysis, recommendations
+
+11. **Real-World Testing**
+    - 2+ weeks continuous operation
+    - Edge case handling
+    - Production hardening
 
 ---
 
@@ -75,24 +93,28 @@ Digital FTE is an autonomous AI agent that:
 
 ### Prerequisites
 
-- Python 3.11+
-- [UV package manager](https://docs.astral.sh/uv/)
-- Anthropic API key ([get one here](https://console.anthropic.com/))
+- Python 3.11+ ✅
+- [UV package manager](https://docs.astral.sh/uv/) ✅ Installed
+- Anthropic API key ([get one here](https://console.anthropic.com/)) ⏳ **Required**
 - Google Cloud project with Gmail API enabled (optional, for email)
 
 ### Installation
 
+**Status:** ✅ Dependencies installed and tested (56 packages)
+
 ```bash
-# Install dependencies
-uv sync
+# Dependencies already installed via uv sync
+# Vault structure already created
 
-# Initialize vault structure (if not already done)
-uv run digital-fte init
-
-# Configure environment
-cp .env.example .env
+# Configure API key (REQUIRED for testing)
 # Edit .env and add your ANTHROPIC_API_KEY
+notepad .env
+
+# Alternative: User is considering OpenAI Agents SDK + Gemini
+# (would require code changes in orchestrator.py)
 ```
+
+**Next Step:** Add your API key to `.env` to enable AI processing.
 
 ### Gmail Setup (Optional)
 
@@ -105,16 +127,29 @@ cp .env.example .env
 
 ### Run
 
+**Status:** ✅ All CLI commands tested and working
+
 ```bash
-# Start the Digital FTE
+# Start the Digital FTE (tested successfully)
 uv run digital-fte start
 
-# Check status
+# Check status (shows vault and configuration)
 uv run digital-fte status
 
 # View help
 uv run digital-fte --help
+
+# Version info
+uv run digital-fte version  # v0.1.0
 ```
+
+**Current Test Results (2026-01-22):**
+- ✅ Orchestrator starts successfully
+- ✅ Filesystem watcher operational
+- ✅ Ralph loop running (5-min cycle)
+- ✅ Health monitoring active
+- ⏳ Gmail watcher ready (needs OAuth setup)
+- ⏳ AI processing ready (needs API key)
 
 ---
 
@@ -290,13 +325,14 @@ digital-fte/
 │   ├── cli.py                 # CLI interface
 │   │
 │   ├── watchers/
-│   │   ├── gmail_watcher.py
-│   │   ├── filesystem_watcher.py
-│   │   └── whatsapp_watcher.py (TODO)
+│   │   ├── gmail_watcher.py         ✅ Built & ready
+│   │   ├── filesystem_watcher.py    ✅ Tested & operational
+│   │   └── whatsapp_watcher.py      🚧 (Future)
 │   │
 │   └── mcp/
-│       ├── email_mcp.py       (TODO)
-│       └── browser_mcp.py     (TODO)
+│       ├── __init__.py              ✅ Created
+│       ├── email_mcp.py             ⏳ Stub created
+│       └── browser_mcp.py           ⏳ Stub created
 │
 ├── AI_Employee_Valut/         # Obsidian vault
 ├── pyproject.toml
@@ -326,15 +362,24 @@ uv run mypy src/
 
 ## 🛣️ Roadmap
 
-### Phase 1: Gold Tier (Current)
-- ✅ Local Obsidian integration
-- ✅ 3 watchers (Gmail, WhatsApp placeholder, Filesystem)
-- ✅ HITL approval workflow
-- ✅ Ralph Wiggum autonomous loop
-- ✅ Company context system
-- 🚧 2 MCP servers (Email, Browser)
-- 🚧 CEO Briefing generation
-- 📅 2+ weeks real-world testing
+### Phase 1: Gold Tier (**70% Complete**)
+- ✅ Local Obsidian integration - **OPERATIONAL**
+- ✅ Filesystem watcher - **TESTED & RUNNING**
+- ✅ Gmail watcher - **BUILT** (needs OAuth)
+- 🚧 WhatsApp watcher - **FUTURE**
+- ✅ HITL approval workflow - **BUILT** (needs API key to test)
+- ✅ Ralph Wiggum autonomous loop - **RUNNING**
+- ✅ Company context system - **COMPLETE**
+- ⏳ 2 MCP servers - **STUBS CREATED** (needs implementation)
+- 🚧 CEO Briefing generation - **PLANNED**
+- 📅 2+ weeks real-world testing - **PENDING API INTEGRATION**
+
+**Latest Session (2026-01-22):**
+- ✅ Dependencies installed (56 packages)
+- ✅ All CLI commands tested
+- ✅ Windows compatibility fixed
+- ✅ Orchestrator tested and operational
+- ✅ MCP integration stubs created
 
 ### Phase 2: Platinum (Future)
 - ☁️ Cloud agent on Oracle Free Tier

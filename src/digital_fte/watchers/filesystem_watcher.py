@@ -15,9 +15,10 @@ from ..models import Priority, Task, TaskStatus, WatcherEvent
 class VaultEventHandler(FileSystemEventHandler):
     """Handle filesystem events in Obsidian vault."""
 
-    def __init__(self, event_queue: asyncio.Queue) -> None:
+    def __init__(self, event_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
         super().__init__()
         self.event_queue = event_queue
+        self.loop = loop
 
     def on_created(self, event: FileSystemEvent) -> None:
         """Handle file creation."""
@@ -25,7 +26,7 @@ class VaultEventHandler(FileSystemEventHandler):
             # Put event in queue for async processing
             asyncio.run_coroutine_threadsafe(
                 self.event_queue.put(("created", event.src_path)),
-                asyncio.get_event_loop()
+                self.loop
             )
 
     def on_modified(self, event: FileSystemEvent) -> None:
@@ -33,7 +34,7 @@ class VaultEventHandler(FileSystemEventHandler):
         if not event.is_directory and event.src_path.endswith(".md"):
             asyncio.run_coroutine_threadsafe(
                 self.event_queue.put(("modified", event.src_path)),
-                asyncio.get_event_loop()
+                self.loop
             )
 
     def on_moved(self, event: FileSystemEvent) -> None:
@@ -41,7 +42,7 @@ class VaultEventHandler(FileSystemEventHandler):
         if not event.is_directory and hasattr(event, "dest_path"):
             asyncio.run_coroutine_threadsafe(
                 self.event_queue.put(("moved", event.src_path, event.dest_path)),
-                asyncio.get_event_loop()
+                self.loop
             )
 
 
@@ -67,8 +68,11 @@ class FilesystemWatcher(BaseWatcher):
         # Create watchdog observer
         self.observer = Observer()
 
+        # Get the current event loop
+        loop = asyncio.get_running_loop()
+
         # Create event handler
-        handler = VaultEventHandler(self.event_queue)
+        handler = VaultEventHandler(self.event_queue, loop)
 
         # Watch the entire vault
         self.observer.schedule(
