@@ -1,0 +1,544 @@
+"""Main orchestrator for Digital FTE - coordinates all watchers and AI agent."""
+
+import asyncio
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
+from anthropic import Anthropic
+
+from .config import get_settings
+from .logger import get_audit_logger
+from .models import Priority, ProposedAction, SystemHealth, Task, TaskStatus
+
+
+class Orchestrator:
+    """
+    Central coordinator for the Digital FTE system.
+
+    Responsibilities:
+    - Start/stop watchers
+    - Process tasks with Claude AI
+    - Handle human-in-the-loop approvals
+    - Execute Ralph Wiggum autonomous loop
+    - Generate CEO briefings
+    - Monitor system health
+    """
+
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.audit = get_audit_logger()
+        self.logger = logging.getLogger("digital_fte.orchestrator")
+
+        # Anthropic client
+        self.claude = Anthropic(api_key=self.settings.anthropic_api_key)
+
+        # Watcher registry
+        self.watchers: dict[str, Any] = {}
+
+        # System state
+        self._running = False
+        self._ralph_task: Optional[asyncio.Task[None]] = None
+        self._health_task: Optional[asyncio.Task[None]] = None
+
+        # Load context documents
+        self._company_handbook: Optional[str] = None
+        self._business_goals: Optional[str] = None
+
+    async def initialize(self) -> None:
+        """Initialize the orchestrator and validate setup."""
+        self.logger.info("Initializing Digital FTE Orchestrator")
+
+        # Validate vault structure
+        if not self.settings.validate_vault_structure():
+            raise RuntimeError("Obsidian vault structure invalid")
+
+        # Load context documents
+        await self._load_context_documents()
+
+        # Register watchers
+        await self._register_watchers()
+
+        self.logger.info("Orchestrator initialized successfully")
+
+    async def _load_context_documents(self) -> None:
+        """Load Company Handbook and Business Goals."""
+        try:
+            with open(self.settings.company_handbook_path, "r", encoding="utf-8") as f:
+                self._company_handbook = f.read()
+
+            with open(self.settings.business_goals_path, "r", encoding="utf-8") as f:
+                self._business_goals = f.read()
+
+            self.logger.info("Loaded context documents (handbook, goals)")
+
+        except Exception as e:
+            self.logger.error(f"Failed to load context documents: {e}")
+            raise
+
+    async def _register_watchers(self) -> None:
+        """Register all enabled watchers."""
+        # Import watchers here to avoid circular imports
+        from .watchers.gmail_watcher import GmailWatcher
+        from .watchers.filesystem_watcher import FilesystemWatcher
+
+        if self.settings.gmail_enabled:
+            self.watchers["gmail"] = GmailWatcher()
+            self.logger.info("Registered Gmail watcher")
+
+        if self.settings.filesystem_enabled:
+            self.watchers["filesystem"] = FilesystemWatcher()
+            self.logger.info("Registered Filesystem watcher")
+
+        # WhatsApp watcher will be added later
+        # if self.settings.whatsapp_enabled:
+        #     self.watchers["whatsapp"] = WhatsAppWatcher()
+
+    async def start(self) -> None:
+        """Start the orchestrator and all watchers."""
+        if self._running:
+            self.logger.warning("Orchestrator already running")
+            return
+
+        self.logger.info("Starting Digital FTE Orchestrator")
+        self._running = True
+
+        try:
+            # Start all watchers
+            for name, watcher in self.watchers.items():
+                try:
+                    await watcher.start()
+                    self.logger.info(f"Started watcher: {name}")
+                except Exception as e:
+                    self.logger.error(f"Failed to start watcher {name}: {e}")
+
+            # Start Ralph Wiggum loop
+            if self.settings.ralph_enabled:
+                self._ralph_task = asyncio.create_task(self._ralph_loop())
+                self.logger.info("Started Ralph Wiggum autonomous loop")
+
+            # Start health monitoring
+            self._health_task = asyncio.create_task(self._health_monitor_loop())
+            self.logger.info("Started health monitoring")
+
+            self.audit.log(
+                event_type="orchestrator_started",
+                actor="ai",
+                details={"watchers": list(self.watchers.keys())},
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to start orchestrator: {e}")
+            await self.stop()
+            raise
+
+    async def stop(self) -> None:
+        """Stop the orchestrator and all watchers."""
+        if not self._running:
+            return
+
+        self.logger.info("Stopping Digital FTE Orchestrator")
+        self._running = False
+
+        # Stop Ralph loop
+        if self._ralph_task:
+            self._ralph_task.cancel()
+
+        # Stop health monitor
+        if self._health_task:
+            self._health_task.cancel()
+
+        # Stop all watchers
+        for name, watcher in self.watchers.items():
+            try:
+                await watcher.stop()
+                self.logger.info(f"Stopped watcher: {name}")
+            except Exception as e:
+                self.logger.error(f"Error stopping watcher {name}: {e}")
+
+        self.audit.log(
+            event_type="orchestrator_stopped",
+            actor="ai",
+            details={},
+        )
+
+    async def _ralph_loop(self) -> None:
+        """
+        Ralph Wiggum autonomous loop.
+
+        "I'm helping!" - Ralph Wiggum
+
+        Continuously processes tasks from Needs_Action folder:
+        1. Read task
+        2. Load handbook + business goals
+        3. Ask Claude for proposed action
+        4. If confidence high enough and handbook allows → execute
+        5. Otherwise → move to Pending_Approval
+        """
+        interval = self.settings.ralph_interval_seconds
+
+        while self._running:
+            try:
+                await self._ralph_iteration()
+
+                # Wait for next iteration
+                await asyncio.sleep(interval)
+
+            except asyncio.CancelledError:
+                break
+
+            except Exception as e:
+                self.logger.error(f"Error in Ralph loop: {e}")
+                self.audit.log_error(
+                    component="ralph_loop",
+                    error=str(e),
+                )
+                await asyncio.sleep(60)  # Back off on error
+
+    async def _ralph_iteration(self) -> None:
+        """Single iteration of Ralph loop."""
+        # Get tasks from Needs_Action
+        tasks = await self._load_tasks_from_folder(self.settings.vault_needs_action)
+
+        if not tasks:
+            return
+
+        self.logger.info(f"Ralph found {len(tasks)} tasks to process")
+
+        # Process each task
+        for task_path in tasks[:self.settings.max_concurrent_tasks]:
+            try:
+                await self._process_task(task_path)
+            except Exception as e:
+                self.logger.error(f"Failed to process task {task_path.name}: {e}")
+
+    async def _load_tasks_from_folder(self, folder: Path) -> list[Path]:
+        """Load all task markdown files from a folder."""
+        if not folder.exists():
+            return []
+
+        return [f for f in folder.glob("*.md") if f.is_file()]
+
+    async def _process_task(self, task_path: Path) -> None:
+        """
+        Process a single task with Claude.
+
+        Args:
+            task_path: Path to task markdown file
+        """
+        self.logger.info(f"Processing task: {task_path.name}")
+
+        # Read task file
+        with open(task_path, "r", encoding="utf-8") as f:
+            task_content = f.read()
+
+        # Build prompt for Claude
+        prompt = self._build_task_prompt(task_content)
+
+        # Call Claude
+        try:
+            response = self.claude.messages.create(
+                model=self.settings.anthropic_model,
+                max_tokens=4096,
+                system=self._build_system_prompt(),
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+            )
+
+            # Parse Claude's response
+            response_text = response.content[0].text
+            proposed_action = await self._parse_claude_response(response_text)
+
+            if proposed_action is None:
+                self.logger.warning(f"Claude didn't propose an action for {task_path.name}")
+                return
+
+            # Decide: auto-approve or require human review?
+            if await self._should_auto_approve(proposed_action):
+                self.logger.info(f"Auto-approving action {proposed_action.id}")
+
+                # Execute action
+                await self._execute_action(proposed_action, task_path)
+
+                # Move to Done
+                await self._move_task(task_path, self.settings.vault_done)
+
+            else:
+                self.logger.info(f"Action {proposed_action.id} requires human approval")
+
+                # Save proposed action to task file
+                await self._update_task_with_action(task_path, proposed_action)
+
+                # Move to Pending_Approval
+                await self._move_task(task_path, self.settings.vault_pending_approval)
+
+        except Exception as e:
+            self.logger.error(f"Error calling Claude for task {task_path.name}: {e}")
+            self.audit.log_error(
+                component="ralph_task_processing",
+                error=str(e),
+                details={"task": task_path.name},
+            )
+
+    def _build_system_prompt(self) -> str:
+        """Build system prompt for Claude with full context."""
+        return f"""You are a Digital Full-Time Employee (FTE) - an AI assistant that helps with business operations.
+
+# Your Operating Context
+
+## Company Handbook (Your Rules)
+{self._company_handbook}
+
+## Business Goals (Your Mission)
+{self._business_goals}
+
+# Your Job
+
+You receive tasks detected by watchers (email, messages, file changes). For each task:
+
+1. **Understand the context** - What happened? What needs to be done?
+2. **Check the handbook** - What are the rules? Is this allowed?
+3. **Check business goals** - Does this align with objectives?
+4. **Propose an action** - What should we do?
+5. **Rate your confidence** - How sure are you? (0.0 - 1.0)
+
+# Response Format
+
+Respond with a JSON object:
+
+```json
+{{
+  "action_type": "email_reply|email_send|file_operation|etc",
+  "title": "Brief title of proposed action",
+  "reasoning": "Explain WHY this action based on handbook/goals",
+  "action_data": {{
+    // Specific details needed to execute the action
+  }},
+  "confidence": 0.85,
+  "handbook_references": ["Section 2.1: Email Protocol", "etc"],
+  "requires_approval": true
+}}
+```
+
+# Decision Rules
+
+**Auto-approve (requires_approval: false) when:**
+- Handbook explicitly allows this type of action
+- Your confidence is >= 0.85
+- No financial impact
+- Low risk
+
+**Require approval (requires_approval: true) when:**
+- Handbook is unclear
+- Confidence < 0.85
+- Financial decision
+- First time seeing this scenario
+- Anything that could hurt the business
+
+**When in doubt, ask for approval.** The human wants you to be helpful but safe.
+"""
+
+    def _build_task_prompt(self, task_content: str) -> str:
+        """Build prompt for Claude to analyze a specific task."""
+        return f"""Here is a task that needs your attention:
+
+{task_content}
+
+Based on the Company Handbook and Business Goals in your system prompt, propose an action to handle this task.
+
+Respond ONLY with the JSON object as specified. No other text.
+"""
+
+    async def _parse_claude_response(self, response: str) -> Optional[ProposedAction]:
+        """Parse Claude's JSON response into ProposedAction."""
+        try:
+            # Extract JSON from response (in case Claude added extra text)
+            start = response.find("{")
+            end = response.rfind("}") + 1
+
+            if start == -1 or end == 0:
+                return None
+
+            json_str = response[start:end]
+            data = json.loads(json_str)
+
+            return ProposedAction(
+                action_type=data["action_type"],
+                title=data["title"],
+                reasoning=data["reasoning"],
+                action_data=data.get("action_data", {}),
+                confidence=data["confidence"],
+                handbook_references=data.get("handbook_references", []),
+                requires_approval=data.get("requires_approval", True),
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to parse Claude response: {e}")
+            self.logger.debug(f"Response was: {response}")
+            return None
+
+    async def _should_auto_approve(self, action: ProposedAction) -> bool:
+        """Determine if an action can be auto-approved."""
+        # Never auto-approve if explicitly requires approval
+        if action.requires_approval:
+            return False
+
+        # Check confidence threshold
+        if action.confidence < self.settings.hitl_confidence_threshold:
+            return False
+
+        # Never auto-approve certain action types
+        never_auto = ["payment", "social_post"]
+        if action.action_type in never_auto:
+            return False
+
+        return True
+
+    async def _execute_action(self, action: ProposedAction, task_path: Path) -> None:
+        """Execute an approved action."""
+        self.logger.info(f"Executing action: {action.action_type}")
+
+        # TODO: Implement actual execution via MCP servers
+        # For now, just log
+
+        self.audit.log_action_executed(
+            action_id=action.id,
+            task_id=task_path.stem,
+            success=True,
+        )
+
+    async def _update_task_with_action(self, task_path: Path, action: ProposedAction) -> None:
+        """Update task file with proposed action."""
+        # Read current content
+        with open(task_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Append proposed action
+        action_md = f"""
+---
+
+## Proposed Action (Requires Approval)
+
+**Action ID:** {action.id}
+**Type:** {action.action_type}
+**Confidence:** {action.confidence:.0%}
+
+### Reasoning
+{action.reasoning}
+
+### Proposed Details
+```json
+{json.dumps(action.action_data, indent=2)}
+```
+
+### Handbook References
+{chr(10).join(f"- {ref}" for ref in action.handbook_references)}
+
+---
+
+**To approve:** Move this file to `/Approved`
+**To reject:** Move this file to `/Rejected`
+"""
+
+        # Write updated content
+        with open(task_path, "w", encoding="utf-8") as f:
+            f.write(content + action_md)
+
+    async def _move_task(self, task_path: Path, destination: Path) -> None:
+        """Move task file to another folder."""
+        new_path = destination / task_path.name
+        task_path.rename(new_path)
+        self.logger.debug(f"Moved {task_path.name} to {destination.name}/")
+
+    async def _health_monitor_loop(self) -> None:
+        """Monitor system health and log status."""
+        interval = self.settings.health_check_interval
+
+        while self._running:
+            try:
+                health = await self._check_health()
+
+                self.audit.log_health_check(health.model_dump())
+
+                # Update dashboard
+                await self._update_dashboard(health)
+
+                await asyncio.sleep(interval)
+
+            except asyncio.CancelledError:
+                break
+
+            except Exception as e:
+                self.logger.error(f"Error in health monitor: {e}")
+                await asyncio.sleep(60)
+
+    async def _check_health(self) -> SystemHealth:
+        """Check system health."""
+        # Check watchers
+        watchers_status = {
+            name: watcher.is_running()
+            for name, watcher in self.watchers.items()
+        }
+
+        # Count tasks in each folder
+        tasks_pending = len(list(self.settings.vault_needs_action.glob("*.md")))
+        tasks_approval = len(list(self.settings.vault_pending_approval.glob("*.md")))
+        tasks_failed = 0  # TODO: Track failed tasks
+
+        return SystemHealth(
+            watchers_running=watchers_status,
+            mcp_servers_healthy={},  # TODO: Check MCP servers
+            tasks_pending=tasks_pending,
+            tasks_needs_approval=tasks_approval,
+            tasks_failed=tasks_failed,
+            vault_path_accessible=self.settings.vault_path.exists(),
+        )
+
+    async def _update_dashboard(self, health: SystemHealth) -> None:
+        """Update Obsidian dashboard with current status."""
+        dashboard_path = self.settings.vault_path / "Dashboard.md"
+
+        # Build status indicators
+        watcher_status = "\n".join([
+            f"| {name} | {'🟢 Running' if status else '🔴 Stopped'} | {datetime.now():%Y-%m-%d %H:%M} |"
+            for name, status in health.watchers_running.items()
+        ])
+
+        content = f"""# AI Employee Dashboard
+
+---
+last_updated: {datetime.now().isoformat()}
+status: {"operational" if all(health.watchers_running.values()) else "degraded"}
+---
+
+## System Status
+
+| Component | Status | Last Check |
+|-----------|--------|------------|
+{watcher_status}
+
+## Pending Work
+
+- **Needs Action:** {health.tasks_pending} tasks
+- **Awaiting Approval:** {health.tasks_needs_approval} tasks
+- **Failed:** {health.tasks_failed} tasks
+
+## Quick Links
+
+- [[Company_Handbook]] - Operating rules
+- [[Business_Goals]] - Business objectives
+- [[Needs_Action/]] - Tasks to process
+- [[Pending_Approval/]] - Awaiting your review
+
+---
+*Last updated: {datetime.now():%Y-%m-%d %H:%M:%S}*
+"""
+
+        with open(dashboard_path, "w", encoding="utf-8") as f:
+            f.write(content)
