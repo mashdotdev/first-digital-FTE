@@ -12,3 +12,17 @@ wheels/
 # Environment files (secrets)
 .env
 backend/.env
+
+# Google OAuth credentials (sensitive)
+credentials.json
+backend/credentials.json
+.google_token.json
+backend/.google_token.json
+
+# Node modules
+node_modules/
+frontend/node_modules/
+
+# Next.js
+.next/
+frontend/.next/
