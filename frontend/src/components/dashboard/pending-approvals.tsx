@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronDown, ChevronUp, X, Mail, FileText } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, X, Mail, FileText, Linkedin, MessageCircle, Twitter } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,10 +26,27 @@ interface PendingApprovalsProps {
   onApprove: (taskId: string, action: "approve" | "reject") => Promise<{ success: boolean; error?: string }>;
 }
 
-function getActionIcon(actionType: string) {
-  if (actionType.toLowerCase().includes("email")) {
+function getActionIcon(actionType: string, content?: string) {
+  const type = actionType.toLowerCase();
+  const contentLower = content?.toLowerCase() || "";
+
+  // Social media platforms
+  if (type.includes("linkedin") || contentLower.includes("platform: linkedin")) {
+    return <Linkedin className="h-4 w-4 text-[#0A66C2]" />;
+  }
+  if (type.includes("whatsapp") || contentLower.includes("platform: whatsapp") || type.includes("whatsapp")) {
+    return <MessageCircle className="h-4 w-4 text-[#25D366]" />;
+  }
+  if (type.includes("twitter") || contentLower.includes("platform: twitter")) {
+    return <Twitter className="h-4 w-4 text-[#1DA1F2]" />;
+  }
+
+  // Email
+  if (type.includes("email")) {
     return <Mail className="h-4 w-4" />;
   }
+
+  // Default
   return <FileText className="h-4 w-4" />;
 }
 
@@ -134,7 +151,7 @@ export function PendingApprovals({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-start gap-2 min-w-0">
-                          {getActionIcon(approval.action.type)}
+                          {getActionIcon(approval.action.type, approval.task.content)}
                           <div className="min-w-0">
                             <h4 className="font-medium text-sm truncate">
                               {approval.task.title}

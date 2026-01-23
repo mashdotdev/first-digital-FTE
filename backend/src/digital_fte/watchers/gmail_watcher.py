@@ -23,6 +23,40 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 class GmailWatcher(BaseWatcher):
     """Watches Gmail inbox for new messages."""
 
+    # Domains to ignore (automated/notification emails)
+    IGNORED_DOMAINS = [
+        "noreply",
+        "no-reply",
+        "notifications",
+        "notification",
+        "mailer",
+        "marketing",
+        "news",
+        "newsletter",
+        "updates",
+        "support",
+        "accounts",
+        "security",
+        "alert",
+        "pinterest",
+        "github",
+        "linkedin",
+        "twitter",
+        "facebook",
+        "instagram",
+        "google",
+        "microsoft",
+        "apple",
+        "amazon",
+        "spotify",
+        "netflix",
+        "uber",
+        "lyft",
+        "doordash",
+        "grubhub",
+        "postmates",
+    ]
+
     def __init__(self) -> None:
         super().__init__(name="gmail")
         self.service: Optional[Any] = None
@@ -75,6 +109,53 @@ class GmailWatcher(BaseWatcher):
 
         self.logger.info("Gmail watcher initialized successfully")
 
+    def _should_ignore_email(self, from_address: str) -> bool:
+        """Check if email should be ignored (automated/promotional)."""
+        from_lower = from_address.lower()
+
+        # Check for ignored domains/keywords in the from address
+        for ignored in self.IGNORED_DOMAINS:
+            if ignored in from_lower:
+                return True
+
+        # Check for common automated email patterns
+        automated_patterns = [
+            "noreply@",
+            "no-reply@",
+            "donotreply@",
+            "do-not-reply@",
+            "notifications@",
+            "notification@",
+            "mailer@",
+            "mailer-daemon@",
+            "postmaster@",
+            "bounce@",
+            "auto@",
+            "automated@",
+            "system@",
+            "admin@",
+            "info@",
+            "hello@",
+            "support@",
+            "help@",
+            "team@",
+            "news@",
+            "newsletter@",
+            "updates@",
+            "marketing@",
+            "promo@",
+            "promotions@",
+            "deals@",
+            "offers@",
+            "sales@",
+        ]
+
+        for pattern in automated_patterns:
+            if pattern in from_lower:
+                return True
+
+        return False
+
     async def check_for_events(self) -> list[WatcherEvent]:
         """Check for new emails."""
         if not self.service:
@@ -88,7 +169,8 @@ class GmailWatcher(BaseWatcher):
             if self.last_checked_time is None:
                 self.last_checked_time = datetime.now() - timedelta(hours=1)
 
-            query = "is:unread"
+            # Only get unread emails from PRIMARY category (excludes Promotions, Social, Updates)
+            query = "is:unread category:primary"
 
             # Get messages
             results = self.service.users().messages().list(
@@ -99,7 +181,7 @@ class GmailWatcher(BaseWatcher):
 
             messages = results.get("messages", [])
 
-            self.logger.debug(f"Found {len(messages)} unread emails")
+            self.logger.debug(f"Found {len(messages)} unread emails in PRIMARY")
 
             for message in messages:
                 # Get full message details
@@ -111,6 +193,12 @@ class GmailWatcher(BaseWatcher):
 
                 # Extract metadata
                 headers = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
+
+                # Filter out automated/promotional emails
+                from_address = headers.get("From", "").lower()
+                if self._should_ignore_email(from_address):
+                    self.logger.debug(f"Ignoring automated email from: {from_address}")
+                    continue
 
                 # Create event
                 event = WatcherEvent(

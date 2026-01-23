@@ -3,3 +3,5 @@ export { StatusCards } from "./status-cards";
 export { PendingApprovals } from "./pending-approvals";
 export { ActivityFeed } from "./activity-feed";
 export { MetricsChart } from "./metrics-chart";
+export { SocialChannels } from "./social-channels";
+export { TaskQueue } from "./task-queue";

@@ -9,6 +9,9 @@ import type {
   AuditEntry,
   TaskCounts,
   DailyMetrics,
+  SocialChannelStatus,
+  SocialChannelsData,
+  SocialPlatform,
 } from "./types";
 
 // Get vault path from env or use default relative path
@@ -121,17 +124,65 @@ export function parseTaskFile(filePath: string): Task {
 
   // Extract title from first heading
   const titleMatch = content.match(/^#\s+(?:Task:\s*)?(.+)/m);
-  const title = titleMatch?.[1] || filename;
+  let title = titleMatch?.[1] || filename;
 
-  // Extract metadata
-  const sourceMatch = content.match(/\*\*Source:\*\*\s*(.+)/);
-  const priorityMatch = content.match(/\*\*Priority:\*\*\s*(.+)/);
-  const createdMatch = content.match(/\*\*Created:\*\*\s*(.+)/);
+  // For email tasks, try to extract the actual subject
+  const subjectMatch = content.match(/\*\*Subject:\*\*\s*(.+)/);
+  if (subjectMatch) {
+    title = `Email: ${subjectMatch[1].trim()}`;
+  }
+
+  // Extract metadata from YAML frontmatter or markdown format
+  const sourceMatch = content.match(/source:\s*(\w+)/i) || content.match(/\*\*Source:\*\*\s*(.+)/);
+  const priorityMatch = content.match(/priority:\s*(\w+)/i) || content.match(/\*\*Priority:\*\*\s*(.+)/);
+  const createdMatch = content.match(/created:\s*(.+)/i) || content.match(/\*\*Created:\*\*\s*(.+)/);
+
+  // Extract sender for emails
+  const fromMatch = content.match(/from\s+([^\n*]+)/i) || content.match(/\*\*From:\*\*\s*(.+)/);
+
+  // Build a better title if we have sender info
+  if (fromMatch && !subjectMatch) {
+    const sender = fromMatch[1].trim().replace(/[<>]/g, "").split("@")[0];
+    if (title.includes("manual task") || title === filename) {
+      title = `Message from ${sender}`;
+    }
+  }
+
+  // Clean up filesystem watcher titles
+  if (title.includes("Process manual task:") || title.includes("task_")) {
+    // Try to find the referenced file and extract its title
+    const referencedFileMatch = content.match(/task_\d+\.md/);
+    if (referencedFileMatch) {
+      // Check if there's a snippet or description we can use
+      const snippetMatch = content.match(/\*\*Snippet:\*\*\s*\n(.+)/);
+      const descMatch = content.match(/## Description\s*\n+(.+)/);
+
+      if (snippetMatch) {
+        title = snippetMatch[1].trim().slice(0, 60) + (snippetMatch[1].length > 60 ? "..." : "");
+      } else if (descMatch) {
+        title = descMatch[1].trim().slice(0, 60) + (descMatch[1].length > 60 ? "..." : "");
+      } else {
+        // Make the task ID more readable
+        const taskId = referencedFileMatch[0].replace(".md", "");
+        const timePart = taskId.split("_").pop() || "";
+        title = `Task from ${timePart.slice(0, 2)}:${timePart.slice(2, 4)}`;
+      }
+    }
+  }
+
+  // Final cleanup - remove "Process manual task:" prefix if it still exists
+  title = title.replace(/^Process manual task:\s*/i, "").trim();
+
+  // If title is still just a task ID, make it more friendly
+  if (/^task_\d+$/.test(title)) {
+    const timePart = title.split("_").pop() || "";
+    title = `Pending task (${timePart.slice(0, 2)}:${timePart.slice(2, 4)})`;
+  }
 
   return {
     id: filename,
     filename,
-    title: title.trim(),
+    title: title.trim() || "Untitled task",
     source: sourceMatch?.[1]?.trim() || "Unknown",
     priority: priorityMatch?.[1]?.trim() || "P3",
     created: createdMatch?.[1]?.trim() || new Date().toISOString().split("T")[0],
@@ -325,4 +376,129 @@ export function getDailyMetrics(days: number = 7): DailyMetrics[] {
 
   // Return sorted by date ascending
   return Array.from(metricsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Auto-cleanup junk tasks from Needs_Action
+// Returns count of deleted tasks
+export function cleanupJunkTasks(): { deleted: number; deletedTasks: string[] } {
+  const vaultPath = getVaultPath();
+  const needsActionPath = path.join(vaultPath, "Needs_Action");
+  const deletedTasks: string[] = [];
+
+  // Patterns that indicate junk/automated tasks
+  const junkPatterns = [
+    /Process manual task:\s*task_\d+\.md/i,  // Filesystem watcher cascade tasks
+    /Human created a new task manually:\s*task_\d+\.md/i,  // Another cascade pattern
+    /source:\s*filesystem[\s\S]*folder.*Needs_Action/i,  // Filesystem watching Needs_Action
+    /pinterest/i,
+    /github\.com/i,
+    /linkedin\.com/i,
+    /twitter\.com/i,
+    /facebook\.com/i,
+    /instagram\.com/i,
+    /noreply@/i,
+    /no-reply@/i,
+    /notifications@/i,
+    /mailer-daemon/i,
+    /postmaster@/i,
+    /newsletter/i,
+    /marketing@/i,
+    /unsubscribe/i,
+    /promotional/i,
+    /accounts\.google/i,
+    /security-noreply/i,
+  ];
+
+  try {
+    const files = fs.readdirSync(needsActionPath).filter((f) => f.endsWith(".md"));
+
+    for (const file of files) {
+      const filePath = path.join(needsActionPath, file);
+      try {
+        const content = fs.readFileSync(filePath, "utf-8");
+
+        // Check if content matches any junk pattern
+        const isJunk = junkPatterns.some((pattern) => pattern.test(content));
+
+        // Also check for filesystem watcher cascade (source: filesystem in Needs_Action)
+        const isFilesystemCascade =
+          content.includes("source: filesystem") &&
+          content.includes("folder") &&
+          content.includes("Needs_Action");
+
+        if (isJunk || isFilesystemCascade) {
+          fs.unlinkSync(filePath);
+          deletedTasks.push(file);
+        }
+      } catch {
+        // Skip files we can't read
+        continue;
+      }
+    }
+  } catch {
+    // Folder doesn't exist or can't be read
+  }
+
+  return { deleted: deletedTasks.length, deletedTasks };
+}
+
+// Get social channels status
+// Checks environment variables and pending posts to determine channel status
+export function getSocialChannelsStatus(): SocialChannelsData {
+  const channels: SocialChannelStatus[] = [
+    {
+      platform: "linkedin" as SocialPlatform,
+      name: "LinkedIn",
+      status: process.env.LINKEDIN_ACCESS_TOKEN ? "connected" : "not_configured",
+      pendingPosts: 0,
+    },
+    {
+      platform: "whatsapp" as SocialPlatform,
+      name: "WhatsApp",
+      status: process.env.WHATSAPP_SESSION ? "connected" : "not_configured",
+      pendingPosts: 0,
+    },
+    {
+      platform: "twitter" as SocialPlatform,
+      name: "Twitter",
+      status: process.env.TWITTER_API_KEY ? "connected" : "not_configured",
+      pendingPosts: 0,
+    },
+  ];
+
+  // Count pending posts per platform from Pending_Approval folder
+  const approvals = getPendingApprovals();
+  let totalPendingPosts = 0;
+
+  for (const approval of approvals) {
+    const actionType = approval.action.type.toLowerCase();
+    const content = approval.task.content.toLowerCase();
+
+    for (const channel of channels) {
+      if (
+        actionType.includes(channel.platform) ||
+        actionType.includes("social_post") && content.includes(channel.platform) ||
+        content.includes(`platform: ${channel.platform}`)
+      ) {
+        channel.pendingPosts = (channel.pendingPosts || 0) + 1;
+        totalPendingPosts++;
+        break;
+      }
+    }
+  }
+
+  // Check for last activity from audit logs
+  const logs = readAuditLogs(100);
+  for (const channel of channels) {
+    const platformLog = logs.find(
+      (log) =>
+        log.details?.platform === channel.platform ||
+        log.event_type?.toLowerCase().includes(channel.platform)
+    );
+    if (platformLog) {
+      channel.lastActivity = platformLog.timestamp;
+    }
+  }
+
+  return { channels, totalPendingPosts };
 }

@@ -7,6 +7,8 @@ import type {
   PendingApproval,
   AuditEntry,
   DailyMetrics,
+  SocialChannelsData,
+  QueuedTask,
 } from "@/lib/types";
 
 interface DashboardState {
@@ -15,6 +17,8 @@ interface DashboardState {
   approvals: PendingApproval[];
   activity: AuditEntry[];
   metrics: DailyMetrics[];
+  socialChannels: SocialChannelsData | null;
+  queuedTasks: QueuedTask[];
   isLoading: boolean;
   error: string | null;
   lastUpdated: Date | null;
@@ -27,6 +31,8 @@ export function useDashboard(refreshInterval: number = 30000) {
     approvals: [],
     activity: [],
     metrics: [],
+    socialChannels: null,
+    queuedTasks: [],
     isLoading: true,
     error: null,
     lastUpdated: null,
@@ -37,12 +43,14 @@ export function useDashboard(refreshInterval: number = 30000) {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       // Fetch all data in parallel
-      const [statusRes, tasksRes, approvalsRes, activityRes, metricsRes] = await Promise.all([
+      const [statusRes, tasksRes, approvalsRes, activityRes, metricsRes, socialRes, queueRes] = await Promise.all([
         fetch("/api/status"),
         fetch("/api/tasks"),
         fetch("/api/approvals"),
         fetch("/api/activity?limit=30"),
         fetch("/api/metrics?days=7"),
+        fetch("/api/social-channels"),
+        fetch("/api/needs-action"),
       ]);
 
       // Check for errors
@@ -50,12 +58,14 @@ export function useDashboard(refreshInterval: number = 30000) {
         throw new Error("Failed to fetch dashboard data");
       }
 
-      const [status, taskCounts, approvals, activity, metrics] = await Promise.all([
+      const [status, taskCounts, approvals, activity, metrics, socialChannels, queuedTasks] = await Promise.all([
         statusRes.json() as Promise<SystemStatus>,
         tasksRes.json() as Promise<TaskCounts>,
         approvalsRes.json() as Promise<PendingApproval[]>,
         activityRes.json() as Promise<AuditEntry[]>,
         metricsRes.ok ? (metricsRes.json() as Promise<DailyMetrics[]>) : Promise.resolve([]),
+        socialRes.ok ? (socialRes.json() as Promise<SocialChannelsData>) : Promise.resolve(null),
+        queueRes.ok ? (queueRes.json() as Promise<QueuedTask[]>) : Promise.resolve([]),
       ]);
 
       setState({
@@ -64,6 +74,8 @@ export function useDashboard(refreshInterval: number = 30000) {
         approvals,
         activity,
         metrics,
+        socialChannels,
+        queuedTasks,
         isLoading: false,
         error: null,
         lastUpdated: new Date(),
@@ -113,9 +125,65 @@ export function useDashboard(refreshInterval: number = 30000) {
     [fetchData]
   );
 
+  // Delete a task from the queue
+  const handleDeleteTask = useCallback(
+    async (taskId: string) => {
+      try {
+        const res = await fetch("/api/needs-action", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to delete task");
+        }
+
+        // Refresh data after deletion
+        await fetchData();
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+        };
+      }
+    },
+    [fetchData]
+  );
+
+  // Cleanup junk tasks automatically
+  const handleCleanupTasks = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cleanup", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to cleanup tasks");
+      }
+
+      const result = await res.json();
+
+      // Refresh data after cleanup
+      await fetchData();
+      return { success: true, deleted: result.deleted };
+    } catch (err) {
+      return {
+        success: false,
+        deleted: 0,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  }, [fetchData]);
+
   return {
     ...state,
     refresh: fetchData,
     handleApproval,
+    handleDeleteTask,
+    handleCleanupTasks,
   };
 }

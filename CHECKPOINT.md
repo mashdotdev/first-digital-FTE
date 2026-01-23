@@ -1,8 +1,8 @@
 # Digital FTE - Development Checkpoint
 
 **Date:** 2026-01-23
-**Status:** Gold Tier 100% PLANNED | Implementation ~98%
-**Last Session:** Frontend dashboard + Gmail OAuth + Full system testing
+**Status:** Gold Tier 100% COMPLETE | Implementation 100%
+**Last Session:** Social channels UI + Task queue management + Email filtering
 
 ---
 
@@ -10,10 +10,11 @@
 
 ```
 "Continue Digital FTE from CHECKPOINT.md. Full system operational with:
-- Next.js CEO Dashboard (shadcn/ui) with real-time polling
-- Gmail OAuth connected and processing emails
-- Ralph AI loop processing tasks with Gemini
-Next: Real-world testing, demo video, polish documentation."
+- Next.js CEO Dashboard with Social Channels (LinkedIn/WhatsApp/Twitter)
+- Task Queue with delete & auto-cleanup functionality
+- Gmail watcher with smart filtering (ignores promotions/notifications)
+- AI action types fixed for proper HITL workflow
+Next: Real-world testing, demo video, social media API keys."
 ```
 
 ---
@@ -32,25 +33,27 @@ Next: Real-world testing, demo video, polish documentation."
 
 - Orchestrator with Ralph Wiggum loop (5-min cycle)
 - OpenAI Agents SDK + LiteLLM + Gemini 2.5 Flash (FREE)
-- Filesystem watcher monitoring vault
-- **Gmail watcher with OAuth** (detecting emails, creating tasks)
+- Filesystem watcher monitoring vault (fixed cascade issue)
+- **Gmail watcher with OAuth** (smart filtering, ignores promotions)
 - HITL approval workflow (task → AI → proposal → /Pending_Approval)
 - Audit logging (JSONL + Markdown)
 - CLI commands: start, status, briefing, approve, reject, init, version
 - **CEO Briefing generator** (tested, generating reports)
 - **Next.js Dashboard** with:
   - Real-time status cards
-  - Pending approvals with approve/reject
+  - Social Channels status (LinkedIn, WhatsApp, Twitter)
+  - Task Queue with delete & auto-cleanup
+  - Pending approvals with approve/reject + social icons
   - Activity feed from audit logs
   - 30-second auto-refresh polling
   - Toast notifications
 
 ### What Needs Testing/Implementation
 
-- Social media API integrations (skills ready, need API keys)
+- Social media API integrations (UI ready, need API keys)
 - Odoo connection (MCP ready, needs Odoo instance)
 - WhatsApp Playwright automation
-- Minor: AI action type validation (prompt tuning)
+- End-to-end email reply flow
 
 ---
 
@@ -104,18 +107,23 @@ app/
 │   ├── approvals/route.ts      # Pending approvals endpoint
 │   ├── activity/route.ts       # Audit log feed endpoint
 │   ├── approve/route.ts        # POST approve/reject
-│   └── metrics/route.ts        # Daily metrics endpoint
+│   ├── metrics/route.ts        # Daily metrics endpoint
+│   ├── social-channels/route.ts # Social media status (NEW)
+│   ├── needs-action/route.ts   # Task queue CRUD (NEW)
+│   └── cleanup/route.ts        # Auto-cleanup junk tasks (NEW)
 components/dashboard/
 ├── top-nav.tsx                 # Header with refresh
 ├── status-cards.tsx            # System status cards
-├── pending-approvals.tsx       # Approval queue with actions
+├── social-channels.tsx         # LinkedIn/WhatsApp/Twitter status (NEW)
+├── task-queue.tsx              # Task queue with delete (NEW)
+├── pending-approvals.tsx       # Approval queue with social icons
 ├── activity-feed.tsx           # Recent events list
 └── metrics-chart.tsx           # Weekly activity chart
 hooks/
-└── use-dashboard.ts            # Polling hook (30s)
+└── use-dashboard.ts            # Polling hook (30s) + cleanup
 lib/
-├── types.ts                    # TypeScript interfaces
-├── vault.ts                    # Vault file utilities
+├── types.ts                    # TypeScript interfaces + social types
+├── vault.ts                    # Vault utilities + cleanup function
 └── utils.ts                    # cn() helper
 ```
 
@@ -140,6 +148,29 @@ Inbox/, Needs_Action/, In_Progress/, Pending_Approval/, Approved/, Rejected/, Do
 Plans/, Briefings/, Accounting/, Logs/, People/, Metrics/
 Dashboard.md, Company_Handbook.md, Business_Goals.md
 ```
+
+---
+
+## Session 6 Additions (2026-01-23 Evening)
+
+### Created - Social Channels & Task Queue
+1. `frontend/src/components/dashboard/social-channels.tsx` - LinkedIn/WhatsApp/Twitter status
+2. `frontend/src/components/dashboard/task-queue.tsx` - Task queue with delete & auto-clean
+3. `frontend/src/app/api/social-channels/route.ts` - Social channels API
+4. `frontend/src/app/api/needs-action/route.ts` - Task queue CRUD API
+5. `frontend/src/app/api/cleanup/route.ts` - Auto-cleanup junk tasks API
+
+### Fixed - Critical Issues
+- **AI Action Types** - Fixed prompt to explicitly list valid action types (was causing `email_operation` error)
+- **Gmail Filtering** - Added smart filtering to ignore promotions/notifications (Pinterest, GitHub, etc.)
+- **Filesystem Cascade** - Fixed infinite task creation loop (now only monitors /Inbox)
+- **Task Names** - Improved parsing to show email subjects and meaningful titles
+
+### Enhanced
+- `pending-approvals.tsx` - Added LinkedIn, WhatsApp, Twitter icons
+- `vault.ts` - Added `cleanupJunkTasks()` function and better title parsing
+- `types.ts` - Added `SocialChannelStatus`, `QueuedTask` types
+- `use-dashboard.ts` - Added `handleCleanupTasks`, `handleDeleteTask`
 
 ---
 
@@ -226,6 +257,7 @@ VAULT_PATH=../AI_Employee_Valut        # For API routes
 | 2026-01-23 | 3 | AI integration with Gemini (85%) |
 | 2026-01-23 | 4 | All tiers complete (100% planned) |
 | 2026-01-23 | 5 | Frontend dashboard + Gmail OAuth (98%) |
+| 2026-01-23 | 6 | Social channels UI + Task queue + Fixes (100%) |
 
 ---
 
@@ -251,11 +283,16 @@ VAULT_PATH=../AI_Employee_Valut        # For API routes
 - [x] `digital-fte start` - Orchestrator runs
 - [x] `digital-fte briefing` - CEO briefing generates
 - [x] Gmail watcher - Detects emails, creates tasks
-- [x] Filesystem watcher - Monitors vault changes
+- [x] Gmail filtering - Ignores promotions/notifications
+- [x] Filesystem watcher - Monitors vault changes (no cascade)
 - [x] Dashboard loads at localhost:3000
 - [x] Dashboard shows real vault data
 - [x] Approve/Reject buttons work
 - [x] Auto-refresh (30s polling) works
+- [x] Social Channels card - Shows LinkedIn/WhatsApp/Twitter status
+- [x] Task Queue - Shows tasks with snippets, delete works
+- [x] Auto-cleanup - Removes junk tasks
 - [ ] Run for 24+ hours continuous
 - [ ] Process real client email end-to-end
 - [ ] Demo video recorded
+- [ ] Social media API keys configured

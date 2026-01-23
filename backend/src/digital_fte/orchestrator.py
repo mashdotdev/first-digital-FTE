@@ -322,17 +322,27 @@ Respond with a JSON object:
 
 ```json
 {{
-  "action_type": "email_reply|email_send|file_operation|etc",
+  "action_type": "<one of the valid types below>",
   "title": "Brief title of proposed action",
   "reasoning": "Explain WHY this action based on handbook/goals",
   "action_data": {{
     // Specific details needed to execute the action
   }},
   "confidence": 0.85,
-  "handbook_references": ["Section 2.1: Email Protocol", "etc"],
+  "handbook_references": ["Section 2.1: Email Protocol"],
   "requires_approval": true
 }}
 ```
+
+## VALID ACTION TYPES (you MUST use exactly one of these):
+- "email_reply" - Reply to an email
+- "email_send" - Send a new email
+- "whatsapp_reply" - Reply to a WhatsApp message
+- "file_operation" - Create, update, or move files
+- "calendar_event" - Schedule calendar events
+- "payment" - Process payments (always requires approval)
+- "social_post" - Post to social media (LinkedIn, Twitter, etc.)
+- "custom" - Any other action not covered above
 
 # Decision Rules
 

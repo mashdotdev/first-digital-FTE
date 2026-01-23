@@ -187,18 +187,60 @@ class FilesystemWatcher(BaseWatcher):
                 status=TaskStatus.REJECTED,
             )
 
-        # Human created new task manually
-        elif event_type == "file_created" and data.get("folder") == "Needs_Action":
+        # Human created new task manually in Inbox (NOT Needs_Action to avoid cascade)
+        # Note: We don't create tasks for files in Needs_Action because other watchers
+        # already create tasks there, and this would cause infinite task creation loops.
+        elif event_type == "file_created" and data.get("folder") == "Inbox":
+            # Try to extract a meaningful title from the file
+            file_path = Path(data.get("path", ""))
+            title = self._extract_title_from_file(file_path)
+
             return Task(
                 source=self.name,
-                title=f"Process manual task: {data['filename']}",
-                description=f"Human created a new task manually: {data['filename']}",
+                title=title,
+                description=f"New task from Inbox: {data['filename']}",
                 context=data,
                 status=TaskStatus.PENDING,
             )
 
         # Don't create tasks for other events
         return None
+
+    def _extract_title_from_file(self, file_path: Path) -> str:
+        """Extract a meaningful title from a file's content."""
+        try:
+            if not file_path.exists():
+                return f"New task: {file_path.stem}"
+
+            content = file_path.read_text(encoding="utf-8")
+
+            # Try to get title from first markdown heading
+            import re
+            heading_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            if heading_match:
+                title = heading_match.group(1).strip()
+                # Clean up common prefixes
+                title = re.sub(r'^(Task:|TODO:|Note:)\s*', '', title, flags=re.IGNORECASE)
+                if title:
+                    return title[:100]  # Limit length
+
+            # Try first non-empty line
+            lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('---')]
+            if lines:
+                first_line = lines[0].lstrip('#').strip()
+                if first_line:
+                    return first_line[:100]
+
+            # Fallback to filename (cleaned up)
+            name = file_path.stem
+            # Convert task_20260123_123456 to more readable format
+            if name.startswith('task_'):
+                return f"Manual task ({name[-6:]})"
+
+            return f"New task: {name}"
+
+        except Exception:
+            return f"New task: {file_path.stem}"
 
     def calculate_priority(self, event: WatcherEvent) -> Priority:
         """Calculate priority for filesystem events."""

@@ -7,6 +7,8 @@ import {
   PendingApprovals,
   ActivityFeed,
   MetricsChart,
+  SocialChannels,
+  TaskQueue,
 } from "@/components/dashboard";
 import { toast } from "sonner";
 
@@ -17,11 +19,15 @@ export default function Dashboard() {
     approvals,
     activity,
     metrics,
+    socialChannels,
+    queuedTasks,
     isLoading,
     error,
     lastUpdated,
     refresh,
     handleApproval,
+    handleDeleteTask,
+    handleCleanupTasks,
   } = useDashboard(30000); // 30 second polling
 
   const onApprove = async (taskId: string, action: "approve" | "reject") => {
@@ -65,21 +71,36 @@ export default function Dashboard() {
           isLoading={isLoading}
         />
 
+        {/* Social Channels */}
+        <SocialChannels
+          data={socialChannels}
+          isLoading={isLoading}
+        />
+
         {/* Main Content Grid */}
         <div className="grid gap-6 lg:grid-cols-2">
+          {/* Task Queue (Needs Action) */}
+          <TaskQueue
+            tasks={queuedTasks}
+            isLoading={isLoading}
+            onDelete={handleDeleteTask}
+            onRefresh={refresh}
+            onCleanup={handleCleanupTasks}
+          />
+
           {/* Pending Approvals */}
           <PendingApprovals
             approvals={approvals}
             isLoading={isLoading}
             onApprove={onApprove}
           />
-
-          {/* Activity Feed */}
-          <ActivityFeed
-            activity={activity}
-            isLoading={isLoading}
-          />
         </div>
+
+        {/* Activity Feed - Full Width */}
+        <ActivityFeed
+          activity={activity}
+          isLoading={isLoading}
+        />
 
         {/* Metrics Chart */}
         <MetricsChart

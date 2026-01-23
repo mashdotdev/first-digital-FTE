@@ -74,3 +74,30 @@ export interface DailyMetrics {
   approved: number;
   rejected: number;
 }
+
+// Social Media Channel Types
+export type SocialPlatform = "linkedin" | "whatsapp" | "twitter" | "instagram" | "facebook";
+
+export interface SocialChannelStatus {
+  platform: SocialPlatform;
+  name: string;
+  status: "connected" | "not_configured" | "error";
+  lastActivity?: string;
+  pendingPosts?: number;
+}
+
+export interface SocialChannelsData {
+  channels: SocialChannelStatus[];
+  totalPendingPosts: number;
+}
+
+// Task Queue Types
+export interface QueuedTask {
+  id: string;
+  filename: string;
+  title: string;
+  source: string;
+  priority: string;
+  created: string;
+  snippet: string;
+}
