@@ -2,7 +2,7 @@
 name = "digital-fte"
 version = "0.1.0"
 description = "Digital Full-Time Employee - AI-powered business automation with local-first privacy"
-readme = "README.md"
+readme = "../README.md"
 requires-python = ">=3.11"
 dependencies = [
     "openai-agents[litellm]>=0.0.10",
