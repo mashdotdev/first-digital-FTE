@@ -7,11 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from anthropic import Anthropic
+from agents import Agent, Runner, set_tracing_disabled
+from agents.extensions.models.litellm_model import LitellmModel
 
 from .config import get_settings
 from .logger import get_audit_logger
 from .models import Priority, ProposedAction, SystemHealth, Task, TaskStatus
+
+# Disable tracing for cleaner output
+set_tracing_disabled(disabled=True)
 
 
 class Orchestrator:
@@ -20,7 +24,7 @@ class Orchestrator:
 
     Responsibilities:
     - Start/stop watchers
-    - Process tasks with Claude AI
+    - Process tasks with Gemini AI
     - Handle human-in-the-loop approvals
     - Execute Ralph Wiggum autonomous loop
     - Generate CEO briefings
@@ -32,8 +36,11 @@ class Orchestrator:
         self.audit = get_audit_logger()
         self.logger = logging.getLogger("digital_fte.orchestrator")
 
-        # Anthropic client
-        self.claude = Anthropic(api_key=self.settings.anthropic_api_key)
+        # LiteLLM model for Gemini
+        self.llm_model = LitellmModel(
+            model=f"gemini/{self.settings.gemini_model}",
+            api_key=self.settings.gemini_api_key,
+        )
 
         # Watcher registry
         self.watchers: dict[str, Any] = {}
@@ -47,6 +54,9 @@ class Orchestrator:
         self._company_handbook: Optional[str] = None
         self._business_goals: Optional[str] = None
 
+        # Agent will be created after context is loaded
+        self._agent: Optional[Agent] = None
+
     async def initialize(self) -> None:
         """Initialize the orchestrator and validate setup."""
         self.logger.info("Initializing Digital FTE Orchestrator")
@@ -57,6 +67,14 @@ class Orchestrator:
 
         # Load context documents
         await self._load_context_documents()
+
+        # Create the AI agent with loaded context
+        self._agent = Agent(
+            name="Digital FTE",
+            instructions=self._build_system_prompt(),
+            model=self.llm_model,
+        )
+        self.logger.info("Created AI agent with Gemini via LiteLLM")
 
         # Register watchers
         await self._register_watchers()
@@ -173,7 +191,7 @@ class Orchestrator:
         Continuously processes tasks from Needs_Action folder:
         1. Read task
         2. Load handbook + business goals
-        3. Ask Claude for proposed action
+        3. Ask Gemini for proposed action
         4. If confidence high enough and handbook allows → execute
         5. Otherwise → move to Pending_Approval
         """
@@ -223,7 +241,7 @@ class Orchestrator:
 
     async def _process_task(self, task_path: Path) -> None:
         """
-        Process a single task with Claude.
+        Process a single task with OpenAI Agents SDK + Gemini via LiteLLM.
 
         Args:
             task_path: Path to task markdown file
@@ -234,29 +252,19 @@ class Orchestrator:
         with open(task_path, "r", encoding="utf-8") as f:
             task_content = f.read()
 
-        # Build prompt for Claude
+        # Build prompt for the agent
         prompt = self._build_task_prompt(task_content)
 
-        # Call Claude
+        # Run the agent
         try:
-            response = self.claude.messages.create(
-                model=self.settings.anthropic_model,
-                max_tokens=4096,
-                system=self._build_system_prompt(),
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-            )
+            result = await Runner.run(self._agent, prompt)
 
-            # Parse Claude's response
-            response_text = response.content[0].text
-            proposed_action = await self._parse_claude_response(response_text)
+            # Get the agent's response
+            response_text = result.final_output
+            proposed_action = await self._parse_agent_response(response_text)
 
             if proposed_action is None:
-                self.logger.warning(f"Claude didn't propose an action for {task_path.name}")
+                self.logger.warning(f"Agent didn't propose an action for {task_path.name}")
                 return
 
             # Decide: auto-approve or require human review?
@@ -279,7 +287,7 @@ class Orchestrator:
                 await self._move_task(task_path, self.settings.vault_pending_approval)
 
         except Exception as e:
-            self.logger.error(f"Error calling Claude for task {task_path.name}: {e}")
+            self.logger.error(f"Error processing task {task_path.name}: {e}")
             self.audit.log_error(
                 component="ralph_task_processing",
                 error=str(e),
@@ -287,7 +295,7 @@ class Orchestrator:
             )
 
     def _build_system_prompt(self) -> str:
-        """Build system prompt for Claude with full context."""
+        """Build system prompt (instructions) for the AI agent."""
         return f"""You are a Digital Full-Time Employee (FTE) - an AI assistant that helps with business operations.
 
 # Your Operating Context
@@ -345,7 +353,7 @@ Respond with a JSON object:
 """
 
     def _build_task_prompt(self, task_content: str) -> str:
-        """Build prompt for Claude to analyze a specific task."""
+        """Build prompt for the agent to analyze a specific task."""
         return f"""Here is a task that needs your attention:
 
 {task_content}
@@ -355,10 +363,10 @@ Based on the Company Handbook and Business Goals in your system prompt, propose 
 Respond ONLY with the JSON object as specified. No other text.
 """
 
-    async def _parse_claude_response(self, response: str) -> Optional[ProposedAction]:
-        """Parse Claude's JSON response into ProposedAction."""
+    async def _parse_agent_response(self, response: str) -> Optional[ProposedAction]:
+        """Parse agent's JSON response into ProposedAction."""
         try:
-            # Extract JSON from response (in case Claude added extra text)
+            # Extract JSON from response (in case agent added extra text)
             start = response.find("{")
             end = response.rfind("}") + 1
 
@@ -379,7 +387,7 @@ Respond ONLY with the JSON object as specified. No other text.
             )
 
         except Exception as e:
-            self.logger.error(f"Failed to parse Claude response: {e}")
+            self.logger.error(f"Failed to parse agent response: {e}")
             self.logger.debug(f"Response was: {response}")
             return None
 

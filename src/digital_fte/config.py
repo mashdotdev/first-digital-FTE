@@ -18,11 +18,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Anthropic API
-    anthropic_api_key: str = Field(..., description="Anthropic API key for Claude")
-    anthropic_model: str = Field(
-        default="claude-sonnet-4-5-20250929",
-        description="Claude model to use"
+    # Google Gemini API
+    gemini_api_key: str = Field(..., description="Google Gemini API key")
+    gemini_model: str = Field(
+        default="gemini-2.0-flash-exp",
+        description="Gemini model to use (gemini-2.0-flash-exp, gemini-1.5-pro, etc.)"
     )
 
     # Obsidian Vault

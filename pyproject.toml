@@ -5,7 +5,7 @@ description = "Digital Full-Time Employee - AI-powered business automation with 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "anthropic>=0.40.0",
+    "openai-agents[litellm]>=0.0.10",
     "watchdog>=4.0.0",
     "google-auth>=2.27.0",
     "google-auth-oauthlib>=1.2.0",

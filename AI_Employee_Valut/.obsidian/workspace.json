@@ -22,6 +22,22 @@
             }
           }
         ]
+      },
+      {
+        "id": "4f264022f93b4ead",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "57f7a07894c8db5a",
+            "type": "leaf",
+            "state": {
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
+            }
+          }
+        ]
       }
     ],
     "direction": "vertical"
@@ -183,8 +199,8 @@
   "active": "39c7d1e7ee88f519",
   "lastOpenFiles": [
     "Dashboard.md",
+    "Company_Handbook.md",
     "Business_Goals.md",
-    "Welcome.md",
-    "Company_Handbook.md"
+    "Welcome.md"
   ]
 }
