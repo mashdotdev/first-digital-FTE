@@ -61,7 +61,7 @@ Silver (3):  linkedin-poster, whatsapp-handler, plan-creator
 Gold (5):    facebook-manager, instagram-manager, twitter-manager, ceo-briefing, odoo-integration
 ```
 
-### Python Modules - `src/digital_fte/`
+### Python Modules - `backend/src/digital_fte/`
 ```
 Core:        models.py, config.py, logger.py, base_watcher.py, orchestrator.py, cli.py
 Watchers:    gmail_watcher.py, filesystem_watcher.py, linkedin_watcher.py, social_media_watcher.py
@@ -124,18 +124,21 @@ Dashboard.md, Company_Handbook.md, Business_Goals.md
 ## Key Commands
 
 ```bash
+# Run from backend/ folder
+cd backend
+
 # Core operations
-digital-fte start           # Start orchestrator
-digital-fte status          # Show system status
-digital-fte briefing        # Generate CEO briefing
+uv run digital-fte start           # Start orchestrator
+uv run digital-fte status          # Show system status
+uv run digital-fte briefing        # Generate CEO briefing
 
 # Task management
-digital-fte approve <task>  # Approve pending task
-digital-fte reject <task>   # Reject pending task
+uv run digital-fte approve <task>  # Approve pending task
+uv run digital-fte reject <task>   # Reject pending task
 
 # Setup
-digital-fte init            # Initialize new vault
-uv sync                     # Install dependencies
+uv sync                            # Install dependencies
+uv run digital-fte init            # Initialize new vault
 ```
 
 ---
@@ -143,9 +146,9 @@ uv sync                     # Install dependencies
 ## Environment Setup
 
 ```bash
-# Required in .env
+# Required in backend/.env
 GEMINI_API_KEY=your_key_here      # Get FREE from aistudio.google.com/apikey
-VAULT_PATH=AI_Employee_Valut
+VAULT_PATH=../AI_Employee_Valut   # Relative path from backend/
 
 # Optional (for full functionality)
 GOOGLE_CREDENTIALS_PATH=credentials.json  # Gmail OAuth
@@ -169,8 +172,9 @@ ODOO_URL=http://localhost:8069            # Odoo ERP
 
 | Purpose | File |
 |---------|------|
-| Main brain | `src/digital_fte/orchestrator.py` |
-| Configuration | `src/digital_fte/config.py` |
+| Main brain | `backend/src/digital_fte/orchestrator.py` |
+| Configuration | `backend/src/digital_fte/config.py` |
+| Project config | `backend/pyproject.toml` |
 | AI rules | `AI_Employee_Valut/Company_Handbook.md` |
 | Business context | `AI_Employee_Valut/Business_Goals.md` |
 | Skill index | `.claude/SKILL.md` |
