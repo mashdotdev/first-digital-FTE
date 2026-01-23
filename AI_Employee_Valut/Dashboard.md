@@ -1,7 +1,7 @@
 # AI Employee Dashboard
 
 ---
-last_updated: 2026-01-22T22:51:52.949429
+last_updated: 2026-01-23T11:17:19.599637
 status: degraded
 ---
 
@@ -9,12 +9,12 @@ status: degraded
 
 | Component | Status | Last Check |
 |-----------|--------|------------|
-| gmail | 🔴 Stopped | 2026-01-22 22:51 |
-| filesystem | 🟢 Running | 2026-01-22 22:51 |
+| gmail | 🔴 Stopped | 2026-01-23 11:17 |
+| filesystem | 🟢 Running | 2026-01-23 11:17 |
 
 ## Pending Work
 
-- **Needs Action:** 0 tasks
+- **Needs Action:** 1 tasks
 - **Awaiting Approval:** 0 tasks
 - **Failed:** 0 tasks
 
@@ -22,8 +22,11 @@ status: degraded
 
 - [[Company_Handbook]] - Operating rules
 - [[Business_Goals]] - Business objectives
+- [[Inbox/]] - Raw incoming items
 - [[Needs_Action/]] - Tasks to process
 - [[Pending_Approval/]] - Awaiting your review
+- [[Plans/]] - Project plans
+- [[Briefings/]] - CEO reports
 
 ---
-*Last updated: 2026-01-22 22:51:52*
+*Last updated: 2026-01-23 11:17:19*

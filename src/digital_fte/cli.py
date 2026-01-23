@@ -152,6 +152,7 @@ def init(
 
     # Create vault directories
     folders = [
+        "Inbox",
         "Needs_Action",
         "Pending_Approval",
         "Approved",
@@ -195,8 +196,8 @@ def init(
     # Create .env template
     console.print("\n[cyan]Creating .env template...[/cyan]")
 
-    env_example = """# Anthropic API
-ANTHROPIC_API_KEY=your_api_key_here
+    env_example = """# Google Gemini API
+GEMINI_API_KEY=your_api_key_here
 
 # Obsidian Vault
 VAULT_PATH=AI_Employee_Vault
@@ -225,7 +226,7 @@ BRIEFING_ENABLED=true
     console.print("\n[bold green]Setup complete![/bold green]")
     console.print("\n[yellow]Next steps:[/yellow]")
     console.print("  1. Copy .env.example to .env")
-    console.print("  2. Add your ANTHROPIC_API_KEY to .env")
+    console.print("  2. Add your GEMINI_API_KEY to .env (get free key from: https://aistudio.google.com/apikey)")
     console.print("  3. Customize Company_Handbook.md and Business_Goals.md")
     console.print("  4. Run: [cyan]digital-fte start[/cyan]")
 
@@ -236,6 +237,103 @@ def version() -> None:
     from . import __version__
 
     console.print(f"[bold]Digital FTE[/bold] version [cyan]{__version__}[/cyan]")
+
+
+@app.command()
+def briefing(
+    days: int = typer.Option(7, help="Number of days to analyze"),
+) -> None:
+    """Generate a CEO briefing report."""
+    setup_logging("WARNING")
+
+    from .briefing_generator import CEOBriefingGenerator
+
+    settings = get_settings()
+
+    console.print(Panel.fit("[bold]Generating CEO Briefing[/bold]", border_style="cyan"))
+
+    try:
+        generator = CEOBriefingGenerator(str(settings.vault_path))
+        filepath = generator.generate_briefing(period_days=days)
+
+        console.print(f"\n[green][OK][/green] CEO briefing generated!")
+        console.print(f"[cyan]Location:[/cyan] {filepath}")
+        console.print(f"\n[dim]Open in Obsidian to view the full report.[/dim]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error generating briefing:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def approve(
+    task_name: str = typer.Argument(..., help="Name of task to approve"),
+) -> None:
+    """Approve a pending task (move from Pending_Approval to Approved)."""
+    setup_logging("WARNING")
+
+    settings = get_settings()
+    pending_path = settings.vault_pending_approval
+    approved_path = settings.vault_approved
+
+    # Find the task file
+    task_file = None
+    for f in pending_path.glob("*.md"):
+        if task_name.lower() in f.stem.lower():
+            task_file = f
+            break
+
+    if task_file is None:
+        console.print(f"[red]Task not found:[/red] {task_name}")
+        console.print(f"[dim]Check files in: {pending_path}[/dim]")
+        raise typer.Exit(code=1)
+
+    # Move to approved
+    new_path = approved_path / task_file.name
+    task_file.rename(new_path)
+
+    console.print(f"[green][OK][/green] Approved: {task_file.name}")
+    console.print(f"[dim]Moved to: {new_path}[/dim]")
+
+
+@app.command()
+def reject(
+    task_name: str = typer.Argument(..., help="Name of task to reject"),
+    reason: Optional[str] = typer.Option(None, help="Reason for rejection"),
+) -> None:
+    """Reject a pending task (move from Pending_Approval to Rejected)."""
+    setup_logging("WARNING")
+
+    settings = get_settings()
+    pending_path = settings.vault_pending_approval
+    rejected_path = settings.vault_rejected
+
+    # Find the task file
+    task_file = None
+    for f in pending_path.glob("*.md"):
+        if task_name.lower() in f.stem.lower():
+            task_file = f
+            break
+
+    if task_file is None:
+        console.print(f"[red]Task not found:[/red] {task_name}")
+        console.print(f"[dim]Check files in: {pending_path}[/dim]")
+        raise typer.Exit(code=1)
+
+    # Add rejection reason if provided
+    if reason:
+        content = task_file.read_text(encoding="utf-8")
+        content += f"\n\n---\n**Rejected:** {reason}\n"
+        task_file.write_text(content, encoding="utf-8")
+
+    # Move to rejected
+    new_path = rejected_path / task_file.name
+    task_file.rename(new_path)
+
+    console.print(f"[yellow][REJECTED][/yellow] {task_file.name}")
+    if reason:
+        console.print(f"[dim]Reason: {reason}[/dim]")
+    console.print(f"[dim]Moved to: {new_path}[/dim]")
 
 
 if __name__ == "__main__":

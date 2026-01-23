@@ -2,5 +2,12 @@
 
 from .filesystem_watcher import FilesystemWatcher
 from .gmail_watcher import GmailWatcher
+from .linkedin_watcher import LinkedInWatcher
+from .social_media_watcher import SocialMediaWatcher
 
-__all__ = ["FilesystemWatcher", "GmailWatcher"]
+__all__ = [
+    "FilesystemWatcher",
+    "GmailWatcher",
+    "LinkedInWatcher",
+    "SocialMediaWatcher",
+]
