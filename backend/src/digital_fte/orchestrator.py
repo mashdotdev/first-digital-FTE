@@ -1,21 +1,17 @@
-"""Main orchestrator for Digital FTE - coordinates all watchers and AI agent."""
+"""Main orchestrator for Digital FTE - coordinates all watchers and Claude Code CLI."""
 
 import asyncio
 import json
 import logging
+import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from agents import Agent, Runner, set_tracing_disabled
-from agents.extensions.models.litellm_model import LitellmModel
-
 from .config import get_settings
 from .logger import get_audit_logger
 from .models import Priority, ProposedAction, SystemHealth, Task, TaskStatus
-
-# Disable tracing for cleaner output
-set_tracing_disabled(disabled=True)
 
 
 class Orchestrator:
@@ -24,7 +20,7 @@ class Orchestrator:
 
     Responsibilities:
     - Start/stop watchers
-    - Process tasks with Gemini AI
+    - Process tasks with Claude Code CLI (uses Claude Pro subscription)
     - Handle human-in-the-loop approvals
     - Execute Ralph Wiggum autonomous loop
     - Generate CEO briefings
@@ -35,12 +31,6 @@ class Orchestrator:
         self.settings = get_settings()
         self.audit = get_audit_logger()
         self.logger = logging.getLogger("digital_fte.orchestrator")
-
-        # LiteLLM model for Gemini
-        self.llm_model = LitellmModel(
-            model=f"gemini/{self.settings.gemini_model}",
-            api_key=self.settings.gemini_api_key,
-        )
 
         # Watcher registry
         self.watchers: dict[str, Any] = {}
@@ -54,9 +44,6 @@ class Orchestrator:
         self._company_handbook: Optional[str] = None
         self._business_goals: Optional[str] = None
 
-        # Agent will be created after context is loaded
-        self._agent: Optional[Agent] = None
-
     async def initialize(self) -> None:
         """Initialize the orchestrator and validate setup."""
         self.logger.info("Initializing Digital FTE Orchestrator")
@@ -65,21 +52,40 @@ class Orchestrator:
         if not self.settings.validate_vault_structure():
             raise RuntimeError("Obsidian vault structure invalid")
 
+        # Verify Claude Code CLI is available
+        await self._verify_claude_code()
+
         # Load context documents
         await self._load_context_documents()
 
-        # Create the AI agent with loaded context
-        self._agent = Agent(
-            name="Digital FTE",
-            instructions=self._build_system_prompt(),
-            model=self.llm_model,
-        )
-        self.logger.info("Created AI agent with Gemini via LiteLLM")
+        self.logger.info("Using Claude Code CLI as the reasoning engine")
 
         # Register watchers
         await self._register_watchers()
 
         self.logger.info("Orchestrator initialized successfully")
+
+    async def _verify_claude_code(self) -> None:
+        """Verify that Claude Code CLI is installed and accessible."""
+        try:
+            result = subprocess.run(
+                [self.settings.claude_code_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
+                self.logger.info(f"Claude Code CLI found: {version}")
+            else:
+                raise RuntimeError(f"Claude Code CLI error: {result.stderr}")
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Claude Code CLI not found at '{self.settings.claude_code_path}'. "
+                "Please install it: npm install -g @anthropic-ai/claude-code"
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Claude Code CLI timed out during version check")
 
     async def _load_context_documents(self) -> None:
         """Load Company Handbook and Business Goals."""
@@ -191,7 +197,7 @@ class Orchestrator:
         Continuously processes tasks from Needs_Action folder:
         1. Read task
         2. Load handbook + business goals
-        3. Ask Gemini for proposed action
+        3. Ask Claude Code for proposed action
         4. If confidence high enough and handbook allows → execute
         5. Otherwise → move to Pending_Approval
         """
@@ -241,7 +247,7 @@ class Orchestrator:
 
     async def _process_task(self, task_path: Path) -> None:
         """
-        Process a single task with OpenAI Agents SDK + Gemini via LiteLLM.
+        Process a single task with Claude Code CLI.
 
         Args:
             task_path: Path to task markdown file
@@ -252,19 +258,17 @@ class Orchestrator:
         with open(task_path, "r", encoding="utf-8") as f:
             task_content = f.read()
 
-        # Build prompt for the agent
+        # Build prompt for Claude Code
         prompt = self._build_task_prompt(task_content)
 
-        # Run the agent
+        # Run Claude Code CLI
         try:
-            result = await Runner.run(self._agent, prompt)
+            response_text = await self._call_claude_code(prompt)
 
-            # Get the agent's response
-            response_text = result.final_output
             proposed_action = await self._parse_agent_response(response_text)
 
             if proposed_action is None:
-                self.logger.warning(f"Agent didn't propose an action for {task_path.name}")
+                self.logger.warning(f"Claude didn't propose an action for {task_path.name}")
                 return
 
             # Decide: auto-approve or require human review?
@@ -293,6 +297,62 @@ class Orchestrator:
                 error=str(e),
                 details={"task": task_path.name},
             )
+
+    async def _call_claude_code(self, prompt: str) -> str:
+        """
+        Call Claude Code CLI with a prompt and return the response.
+
+        Uses the user's Claude Pro subscription via the CLI.
+        """
+        # Write prompt to a temp file to avoid shell escaping issues
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(prompt)
+            prompt_file = f.name
+
+        try:
+            # Build Claude Code command
+            cmd = [
+                self.settings.claude_code_path,
+                "--print",  # Print response and exit (non-interactive)
+                "--model", self.settings.claude_code_model,
+            ]
+
+            # Run Claude Code with the prompt via stdin
+            # Use cwd parameter to set working directory to the vault
+            vault_path = str(self.settings.vault_path.resolve())
+            self.logger.debug(f"Running Claude Code in {vault_path}: {' '.join(cmd)}")
+
+            # Use asyncio to run subprocess without blocking
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=vault_path,  # Set working directory to vault
+            )
+
+            # Send prompt and get response
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(input=prompt.encode('utf-8')),
+                timeout=self.settings.claude_code_timeout
+            )
+
+            if process.returncode != 0:
+                error_msg = stderr.decode('utf-8') if stderr else "Unknown error"
+                raise RuntimeError(f"Claude Code failed: {error_msg}")
+
+            response = stdout.decode('utf-8').strip()
+            self.logger.debug(f"Claude Code response length: {len(response)} chars")
+
+            return response
+
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"Claude Code timed out after {self.settings.claude_code_timeout}s"
+            )
+        finally:
+            # Clean up temp file
+            Path(prompt_file).unlink(missing_ok=True)
 
     def _build_system_prompt(self) -> str:
         """Build system prompt (instructions) for the AI agent."""
@@ -363,12 +423,20 @@ Respond with a JSON object:
 """
 
     def _build_task_prompt(self, task_content: str) -> str:
-        """Build prompt for the agent to analyze a specific task."""
-        return f"""Here is a task that needs your attention:
+        """Build complete prompt for Claude Code to analyze a task."""
+        system_context = self._build_system_prompt()
+
+        return f"""{system_context}
+
+---
+
+# CURRENT TASK
 
 {task_content}
 
-Based on the Company Handbook and Business Goals in your system prompt, propose an action to handle this task.
+---
+
+Based on the Company Handbook and Business Goals above, propose an action to handle this task.
 
 Respond ONLY with the JSON object as specified. No other text.
 """

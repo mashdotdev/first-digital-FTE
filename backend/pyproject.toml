@@ -5,7 +5,8 @@ description = "Digital Full-Time Employee - AI-powered business automation with 
 readme = "../README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "openai-agents[litellm]>=0.0.10",
+    # Claude Code CLI is used directly (installed separately via npm)
+    # No Python SDK needed - uses subprocess to call 'claude' command
     "watchdog>=4.0.0",
     "google-auth>=2.27.0",
     "google-auth-oauthlib>=1.2.0",

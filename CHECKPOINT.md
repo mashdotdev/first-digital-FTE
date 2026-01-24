@@ -1,8 +1,35 @@
 # Digital FTE - Development Checkpoint
 
-**Date:** 2026-01-23
+**Date:** 2026-01-24
 **Status:** Gold Tier 100% COMPLETE | Implementation 100%
-**Last Session:** Social channels UI + Task queue management + Email filtering
+**Last Session:** Migrated from OpenAI Agents SDK to Claude Code CLI
+
+---
+
+## Migration Complete: OpenAI Agents SDK → Claude Code CLI
+
+**Why:** Hackathon requirement states "All AI functionality should be implemented as Agent Skills" using Claude Code with a Claude Pro subscription.
+
+**What Changed:**
+- Removed: `openai-agents[litellm]` dependency
+- Removed: Gemini API key requirement
+- Added: Claude Code CLI integration via subprocess
+- Updated: `orchestrator.py` to call `claude --print` command
+- Updated: `config.py` with Claude Code settings
+- Updated: `.env` files with new configuration
+
+**How It Works Now:**
+```
+Watcher detects event → Creates task in /Needs_Action
+                     ↓
+Orchestrator reads task → Builds prompt with handbook + goals
+                       ↓
+Subprocess: claude --print --model sonnet --cwd vault_path
+                       ↓
+Claude Code (via Pro subscription) → Returns JSON action proposal
+                       ↓
+Auto-approve or → /Pending_Approval for human review
+```
 
 ---
 
@@ -32,7 +59,7 @@ Next: Real-world testing, demo video, social media API keys."
 ### What's Working (Tested) ✅
 
 - Orchestrator with Ralph Wiggum loop (5-min cycle)
-- OpenAI Agents SDK + LiteLLM + Gemini 2.5 Flash (FREE)
+- **Claude Code CLI** (uses Claude Pro subscription - hackathon requirement!)
 - Filesystem watcher monitoring vault (fixed cascade issue)
 - **Gmail watcher with OAuth** (smart filtering, ignores promotions)
 - HITL approval workflow (task → AI → proposal → /Pending_Approval)
@@ -73,7 +100,7 @@ Next: Real-world testing, demo video, social media API keys."
                      ▼
               ┌─────────────┐
               │ Ralph Loop  │
-              │  (Gemini)   │
+              │(Claude Code)│
               └──────┬──────┘
                      │
                      ▼
@@ -90,7 +117,7 @@ Next: Real-world testing, demo video, social media API keys."
       └──────────┘
 ```
 
-**AI Stack:** OpenAI Agents SDK → LiteLLM → Gemini 2.5 Flash (FREE)
+**AI Stack:** Claude Code CLI → Claude Pro Subscription (hackathon compliant!)
 
 ---
 
@@ -237,8 +264,13 @@ bun build                          # Production build
 ## Environment Setup
 
 ```bash
+# Required: Install and login to Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+claude login  # Uses your Claude Pro subscription
+
 # Required in backend/.env
-GEMINI_API_KEY=your_key_here           # Get FREE from aistudio.google.com/apikey
+CLAUDE_CODE_PATH=claude                # Path to Claude Code CLI
+CLAUDE_CODE_MODEL=sonnet               # Claude model (sonnet, opus, haiku)
 VAULT_PATH=../AI_Employee_Valut        # Relative path from backend/
 GOOGLE_CREDENTIALS_PATH=credentials.json  # Gmail OAuth (download from GCP)
 

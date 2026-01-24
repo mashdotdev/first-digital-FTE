@@ -18,11 +18,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Google Gemini API
-    gemini_api_key: str = Field(..., description="Google Gemini API key")
-    gemini_model: str = Field(
-        default="gemini-2.0-flash-exp",
-        description="Gemini model to use (gemini-2.0-flash-exp, gemini-1.5-pro, etc.)"
+    # Claude Code CLI Configuration
+    claude_code_path: str = Field(
+        default="claude",
+        description="Path to Claude Code CLI executable"
+    )
+    claude_code_timeout: int = Field(
+        default=300,
+        description="Timeout for Claude Code CLI calls (seconds)"
+    )
+    claude_code_model: str = Field(
+        default="sonnet",
+        description="Claude model to use (sonnet, opus, haiku)"
     )
 
     # Obsidian Vault
