@@ -1,6 +1,7 @@
 """Base watcher class for Digital FTE."""
 
 import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -294,7 +295,7 @@ source: {task.source}
 ## Context
 
 ```json
-{task.context}
+{json.dumps(task.context, indent=2)}
 ```
 
 ## Proposed Action

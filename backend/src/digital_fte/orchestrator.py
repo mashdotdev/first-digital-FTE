@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from .config import get_settings
 from .logger import get_audit_logger
+from .mcp.email_mcp import EmailMCP
 from .models import Priority, ProposedAction, SystemHealth, Task, TaskStatus
 
 
@@ -34,6 +35,9 @@ class Orchestrator:
 
         # Watcher registry
         self.watchers: dict[str, Any] = {}
+
+        # MCP servers
+        self.email_mcp = EmailMCP()
 
         # System state
         self._running = False
@@ -110,7 +114,9 @@ class Orchestrator:
 
         if self.settings.gmail_enabled:
             self.watchers["gmail"] = GmailWatcher()
-            self.logger.info("Registered Gmail watcher")
+            # Connect EmailMCP to Gmail watcher for sending
+            self.email_mcp.set_gmail_watcher(self.watchers["gmail"])
+            self.logger.info("Registered Gmail watcher + Email MCP")
 
         if self.settings.filesystem_enabled:
             self.watchers["filesystem"] = FilesystemWatcher()
@@ -395,14 +401,44 @@ Respond with a JSON object:
 ```
 
 ## VALID ACTION TYPES (you MUST use exactly one of these):
-- "email_reply" - Reply to an email
-- "email_send" - Send a new email
-- "whatsapp_reply" - Reply to a WhatsApp message
-- "file_operation" - Create, update, or move files
-- "calendar_event" - Schedule calendar events
-- "payment" - Process payments (always requires approval)
-- "social_post" - Post to social media (LinkedIn, Twitter, etc.)
-- "custom" - Any other action not covered above
+
+### email_reply - Reply to an email
+action_data must contain:
+- "body": "The reply message text"
+- "to": (optional) recipient email, defaults to sender
+
+### email_send - Send a new email
+action_data must contain:
+- "to": "recipient@email.com"
+- "subject": "Email subject"
+- "body": "Email body text"
+
+### whatsapp_reply - Reply to a WhatsApp message
+action_data must contain:
+- "body": "The reply message"
+
+### file_operation - Create, update, or move files
+action_data must contain:
+- "operation": "create" | "update" | "move"
+- "path": "file path"
+- "content": "file content" (for create/update)
+
+### calendar_event - Schedule calendar events
+action_data must contain:
+- "title": "Event title"
+- "datetime": "ISO datetime"
+
+### payment - Process payments (always requires approval)
+action_data must contain:
+- "amount": dollar amount
+- "recipient": "who to pay"
+
+### social_post - Post to social media
+action_data must contain:
+- "platform": "linkedin" | "twitter" | "facebook"
+- "content": "post content"
+
+### custom - Any other action
 
 # Decision Rules
 
@@ -487,17 +523,88 @@ Respond ONLY with the JSON object as specified. No other text.
         return True
 
     async def _execute_action(self, action: ProposedAction, task_path: Path) -> None:
-        """Execute an approved action."""
-        self.logger.info(f"Executing action: {action.action_type}")
+        """Execute an approved action via appropriate MCP server."""
+        action_type = action.action_type
+        if hasattr(action_type, 'value'):
+            action_type = action_type.value
 
-        # TODO: Implement actual execution via MCP servers
-        # For now, just log
+        self.logger.info(f"Executing action: {action_type}")
+
+        success = False
+
+        try:
+            # Read task file to get context
+            with open(task_path, "r", encoding="utf-8") as f:
+                task_content = f.read()
+
+            # Extract context from task (email metadata, etc.)
+            task_context = self._extract_task_context(task_content)
+
+            # Route to appropriate MCP server
+            if action_type in ["email_reply", "email_send"]:
+                success = await self.email_mcp.execute_action(action, task_context)
+
+            elif action_type == "social_post":
+                # TODO: Implement social media MCP
+                self.logger.warning(f"Social post MCP not yet implemented")
+                success = False
+
+            elif action_type == "file_operation":
+                # File operations are handled directly
+                self.logger.info("File operation - no external action needed")
+                success = True
+
+            else:
+                self.logger.warning(f"Unknown action type: {action_type}")
+                success = False
+
+        except Exception as e:
+            self.logger.error(f"Failed to execute action: {e}")
+            success = False
 
         self.audit.log_action_executed(
             action_id=action.id,
             task_id=task_path.stem,
-            success=True,
+            success=success,
         )
+
+        if not success:
+            raise RuntimeError(f"Failed to execute action: {action_type}")
+
+    def _extract_task_context(self, task_content: str) -> dict:
+        """Extract context/metadata from task markdown file."""
+        import ast
+        import re
+
+        context = {}
+
+        # Try to extract from the JSON/dict context block
+        json_match = re.search(r"```json\s*(\{.*?\})\s*```", task_content, re.DOTALL)
+        if json_match:
+            raw_context = json_match.group(1).strip()
+            try:
+                # Try JSON first (new format)
+                context = json.loads(raw_context)
+            except json.JSONDecodeError:
+                try:
+                    # Fall back to Python literal (old format with single quotes)
+                    context = ast.literal_eval(raw_context)
+                except (ValueError, SyntaxError):
+                    pass
+
+        # Also extract from markdown patterns as backup
+        patterns = {
+            "subject": r"\*\*Subject:\*\*\s*(.+)",
+            "from": r"New email received from\s+(.+)",
+        }
+
+        for key, pattern in patterns.items():
+            if key not in context:
+                match = re.search(pattern, task_content)
+                if match:
+                    context[key] = match.group(1).strip()
+
+        return context
 
     async def _update_task_with_action(self, task_path: Path, action: ProposedAction) -> None:
         """Update task file with proposed action."""
