@@ -44,6 +44,10 @@ class Settings(BaseSettings):
 
     whatsapp_enabled: bool = Field(default=False, description="Enable WhatsApp watcher")
     whatsapp_poll_interval: int = Field(default=120, description="WhatsApp check interval")
+    whatsapp_user_data_dir: Path = Field(
+        default=Path(".whatsapp_session"),
+        description="Playwright user data directory for WhatsApp session persistence"
+    )
 
     filesystem_enabled: bool = Field(default=True, description="Enable filesystem watcher")
 

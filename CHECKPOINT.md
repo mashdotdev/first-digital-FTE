@@ -1,8 +1,8 @@
 # Digital FTE - Development Checkpoint
 
-**Date:** 2026-01-24
-**Status:** Gold Tier 100% COMPLETE | Gmail Reply WORKING!
-**Last Session:** Gmail reply fully functional with Claude Code CLI
+**Date:** 2026-01-25
+**Status:** Gold Tier 100% COMPLETE | Gmail + WhatsApp Automation!
+**Last Session:** WhatsApp Web automation with Playwright implemented
 
 ---
 
@@ -39,9 +39,10 @@ Auto-approve or → /Pending_Approval for human review
 "Continue Digital FTE from CHECKPOINT.md. Full system operational with:
 - Claude Code CLI as reasoning engine (hackathon compliant!)
 - Gmail read + reply FULLY WORKING (tested, emails sent!)
+- WhatsApp Web automation with Playwright (NEW!)
 - Next.js CEO Dashboard with real-time updates
 - HITL approval workflow functional
-Next: WhatsApp integration, demo video, social media API keys."
+Next: Test WhatsApp flow, demo video, social media API keys."
 ```
 
 ---
@@ -86,8 +87,9 @@ Next: WhatsApp integration, demo video, social media API keys."
 
 - Social media API integrations (UI ready, need API keys)
 - Odoo connection (MCP ready, needs Odoo instance)
-- WhatsApp Playwright automation
+- ~~WhatsApp Playwright automation~~ ✅ IMPLEMENTED!
 - ~~End-to-end email reply flow~~ ✅ DONE!
+- WhatsApp end-to-end test (scan QR, receive message, send reply)
 
 ---
 
@@ -171,8 +173,8 @@ Gold (5):    facebook-manager, instagram-manager, twitter-manager, ceo-briefing,
 ### Python Modules - `backend/src/digital_fte/`
 ```
 Core:        models.py, config.py, logger.py, base_watcher.py, orchestrator.py, cli.py
-Watchers:    gmail_watcher.py, filesystem_watcher.py, linkedin_watcher.py, social_media_watcher.py
-MCP:         email_mcp.py, browser_mcp.py, odoo_mcp.py
+Watchers:    gmail_watcher.py, filesystem_watcher.py, linkedin_watcher.py, social_media_watcher.py, whatsapp_watcher.py
+MCP:         email_mcp.py, browser_mcp.py, odoo_mcp.py, whatsapp_mcp.py
 New:         briefing_generator.py
 ```
 
@@ -182,6 +184,48 @@ Inbox/, Needs_Action/, In_Progress/, Pending_Approval/, Approved/, Rejected/, Do
 Plans/, Briefings/, Accounting/, Logs/, People/, Metrics/
 Dashboard.md, Company_Handbook.md, Business_Goals.md
 ```
+
+---
+
+## Session 8 Additions (2026-01-25)
+
+### WhatsApp Automation - Implemented!
+1. `watchers/whatsapp_watcher.py` - Complete Playwright-based watcher
+   - Persistent browser context (QR login saved in `.whatsapp_session/`)
+   - Detects unread messages with priority keywords
+   - Extracts contact name and message content
+   - Sends messages via WhatsApp Web automation
+
+2. `mcp/whatsapp_mcp.py` - WhatsApp MCP for action execution
+   - `send_message()` - Send to contact
+   - `reply_to_message()` - Reply in context
+   - `execute_action()` - Handle `whatsapp_reply` action type
+
+3. `config.py` - Added `whatsapp_user_data_dir` setting
+
+4. `orchestrator.py` - Registered WhatsApp watcher + MCP
+   - Routes `whatsapp_reply` actions to WhatsAppMCP
+
+5. Updated exports in `watchers/__init__.py` and `mcp/__init__.py`
+
+### How WhatsApp Works
+```
+First run: Browser opens → Scan QR with phone → Session saved
+         ↓
+Watcher polls every 2 min → Detects unread messages
+         ↓
+Creates task in /Needs_Action with priority (P0-P3)
+         ↓
+Claude Code proposes reply → Requires human approval
+         ↓
+After approval → WhatsAppMCP sends message via Playwright
+```
+
+### Key Selectors (WhatsApp Web 2026)
+- Chat list: `#pane-side`, `[data-testid='cell-frame-container']`
+- Unread badge: `[data-testid='icon-unread-count']`
+- Message input: `[data-testid='conversation-compose-box-input']`
+- Send button: `[data-testid='send']`
 
 ---
 
@@ -324,6 +368,7 @@ VAULT_PATH=../AI_Employee_Valut        # For API routes
 | 2026-01-23 | 5 | Frontend dashboard + Gmail OAuth (98%) |
 | 2026-01-23 | 6 | Social channels UI + Task queue + Fixes (100%) |
 | 2026-01-24 | 7 | **Claude Code CLI migration + Gmail reply WORKING!** |
+| 2026-01-25 | 8 | **WhatsApp automation with Playwright!** |
 
 ---
 
@@ -363,5 +408,6 @@ VAULT_PATH=../AI_Employee_Valut        # For API routes
 - [x] **End-to-end email flow** ✅ NEW!
 - [ ] Run for 24+ hours continuous
 - [ ] Demo video recorded
-- [ ] WhatsApp integration
+- [x] **WhatsApp integration - Playwright watcher + MCP** ✅ NEW!
+- [ ] WhatsApp end-to-end test (QR scan, message, reply)
 - [ ] Social media API keys configured

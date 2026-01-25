@@ -12,6 +12,7 @@ from typing import Any, Optional
 from .config import get_settings
 from .logger import get_audit_logger
 from .mcp.email_mcp import EmailMCP
+from .mcp.whatsapp_mcp import WhatsAppMCP
 from .models import Priority, ProposedAction, SystemHealth, Task, TaskStatus
 
 
@@ -38,6 +39,7 @@ class Orchestrator:
 
         # MCP servers
         self.email_mcp = EmailMCP()
+        self.whatsapp_mcp = WhatsAppMCP()
 
         # System state
         self._running = False
@@ -111,6 +113,7 @@ class Orchestrator:
         # Import watchers here to avoid circular imports
         from .watchers.gmail_watcher import GmailWatcher
         from .watchers.filesystem_watcher import FilesystemWatcher
+        from .watchers.whatsapp_watcher import WhatsAppWatcher
 
         if self.settings.gmail_enabled:
             self.watchers["gmail"] = GmailWatcher()
@@ -122,9 +125,11 @@ class Orchestrator:
             self.watchers["filesystem"] = FilesystemWatcher()
             self.logger.info("Registered Filesystem watcher")
 
-        # WhatsApp watcher will be added later
-        # if self.settings.whatsapp_enabled:
-        #     self.watchers["whatsapp"] = WhatsAppWatcher()
+        if self.settings.whatsapp_enabled:
+            self.watchers["whatsapp"] = WhatsAppWatcher()
+            # Connect WhatsAppMCP to WhatsApp watcher for sending
+            self.whatsapp_mcp.set_whatsapp_watcher(self.watchers["whatsapp"])
+            self.logger.info("Registered WhatsApp watcher + WhatsApp MCP")
 
     async def start(self) -> None:
         """Start the orchestrator and all watchers."""
@@ -543,6 +548,9 @@ Respond ONLY with the JSON object as specified. No other text.
             # Route to appropriate MCP server
             if action_type in ["email_reply", "email_send"]:
                 success = await self.email_mcp.execute_action(action, task_context)
+
+            elif action_type == "whatsapp_reply":
+                success = await self.whatsapp_mcp.execute_action(action, task_context)
 
             elif action_type == "social_post":
                 # TODO: Implement social media MCP
