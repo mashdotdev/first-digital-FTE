@@ -26,3 +26,18 @@ frontend/node_modules/
 # Next.js
 .next/
 frontend/.next/
+
+# WhatsApp Playwright session (browser cache)
+.whatsapp_session/
+backend/.whatsapp_session/
+
+# AI Employee Vault - Dynamic content (tasks, invoices, logs)
+AI_Employee_Valut/Invoices/
+AI_Employee_Valut/Done/
+AI_Employee_Valut/Approved/
+AI_Employee_Valut/Rejected/
+AI_Employee_Valut/Needs_Action/
+AI_Employee_Valut/Pending_Approval/
+AI_Employee_Valut/Logs/
+AI_Employee_Valut/Briefings/
+AI_Employee_Valut/.obsidian/

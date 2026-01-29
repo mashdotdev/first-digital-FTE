@@ -49,6 +49,15 @@ class Settings(BaseSettings):
         description="Playwright user data directory for WhatsApp session persistence"
     )
 
+    # Twitter Configuration
+    twitter_enabled: bool = Field(default=False, description="Enable Twitter integration")
+    twitter_api_key: Optional[str] = Field(default=None, description="Twitter API Key")
+    twitter_api_secret: Optional[str] = Field(default=None, description="Twitter API Secret")
+    twitter_access_token: Optional[str] = Field(default=None, description="Twitter Access Token")
+    twitter_access_token_secret: Optional[str] = Field(
+        default=None, description="Twitter Access Token Secret"
+    )
+
     filesystem_enabled: bool = Field(default=True, description="Enable filesystem watcher")
 
     # MCP Servers

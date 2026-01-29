@@ -13,6 +13,8 @@ from .config import get_settings
 from .logger import get_audit_logger
 from .mcp.email_mcp import EmailMCP
 from .mcp.whatsapp_mcp import WhatsAppMCP
+from .mcp.twitter_mcp import TwitterMCP
+from .mcp.invoice_mcp import InvoiceMCP
 from .models import Priority, ProposedAction, SystemHealth, Task, TaskStatus
 
 
@@ -40,6 +42,8 @@ class Orchestrator:
         # MCP servers
         self.email_mcp = EmailMCP()
         self.whatsapp_mcp = WhatsAppMCP()
+        self.twitter_mcp = TwitterMCP()
+        self.invoice_mcp = InvoiceMCP()
 
         # System state
         self._running = False
@@ -68,6 +72,18 @@ class Orchestrator:
 
         # Register watchers
         await self._register_watchers()
+
+        # Initialize Twitter MCP if enabled
+        if self.settings.twitter_enabled:
+            twitter_init = await self.twitter_mcp.initialize()
+            if twitter_init:
+                self.logger.info("Twitter MCP initialized")
+            else:
+                self.logger.warning("Twitter MCP initialization failed - check API credentials")
+
+        # Initialize Invoice MCP
+        await self.invoice_mcp.initialize()
+        self.logger.info("Invoice MCP initialized")
 
         self.logger.info("Orchestrator initialized successfully")
 
@@ -234,8 +250,35 @@ class Orchestrator:
 
     async def _ralph_iteration(self) -> None:
         """Single iteration of Ralph loop."""
-        # Get tasks from Needs_Action
+        # FIRST: Process any approved tasks (execute them immediately)
+        approved_tasks = await self._load_tasks_from_folder(self.settings.vault_approved)
+        if approved_tasks:
+            self.logger.info(f"Found {len(approved_tasks)} approved tasks to execute")
+            for task_path in approved_tasks:
+                try:
+                    await self._execute_approved_task(task_path)
+                except Exception as e:
+                    self.logger.error(f"Failed to execute approved task {task_path.name}: {e}")
+                    self.audit.log_error(
+                        component="ralph_approved_execution",
+                        error=str(e),
+                        details={"task": task_path.name},
+                    )
+
+        # THEN: Get new tasks from Needs_Action
         tasks = await self._load_tasks_from_folder(self.settings.vault_needs_action)
+
+        # Log Ralph iteration to audit for visibility
+        self.audit.log(
+            event_type="ralph_iteration",
+            actor="ai",
+            details={
+                "summary": f"Ralph checking: {len(approved_tasks)} approved, {len(tasks)} pending",
+                "approved_tasks": len(approved_tasks),
+                "tasks_found": len(tasks),
+                "task_names": [t.name for t in tasks[:5]],  # First 5 for brevity
+            },
+        )
 
         if not tasks:
             return
@@ -256,6 +299,120 @@ class Orchestrator:
 
         return [f for f in folder.glob("*.md") if f.is_file()]
 
+    async def _execute_approved_task(self, task_path: Path) -> None:
+        """
+        Execute an approved task.
+
+        Reads the proposed action from the task file and executes it.
+        """
+        self.logger.info(f"Executing approved task: {task_path.name}")
+
+        self.audit.log(
+            event_type="ralph_approved_start",
+            actor="ai",
+            task_id=task_path.stem,
+            details={
+                "summary": f"Executing approved task {task_path.name}",
+                "task_file": task_path.name,
+            },
+        )
+
+        # Read task file
+        with open(task_path, "r", encoding="utf-8") as f:
+            task_content = f.read()
+
+        # Parse the proposed action from the task file
+        proposed_action = self._parse_proposed_action_from_task(task_content)
+
+        if proposed_action is None:
+            self.logger.error(f"Could not find proposed action in {task_path.name}")
+            # Move to rejected as it can't be executed
+            await self._move_task(task_path, self.settings.vault_rejected)
+            return
+
+        self.logger.info(f"Found action: {proposed_action.action_type} - {proposed_action.title}")
+
+        # Execute the action
+        await self._execute_action(proposed_action, task_path)
+
+        # Move to Done
+        await self._move_task(task_path, self.settings.vault_done)
+
+        self.audit.log(
+            event_type="ralph_approved_complete",
+            actor="ai",
+            task_id=task_path.stem,
+            action_id=proposed_action.id,
+            details={
+                "summary": f"Executed approved action: {proposed_action.action_type}",
+                "action_type": proposed_action.action_type,
+            },
+        )
+
+    def _parse_proposed_action_from_task(self, task_content: str) -> Optional[ProposedAction]:
+        """
+        Parse the proposed action from a task file that was moved to Approved.
+
+        The action JSON is stored in a code block within the task.
+        """
+        import re
+
+        try:
+            # Look for the Action ID
+            action_id_match = re.search(r"\*\*Action ID:\*\*\s*(\S+)", task_content)
+            action_id = action_id_match.group(1) if action_id_match else None
+
+            # Look for the action type
+            type_match = re.search(r"\*\*Type:\*\*\s*(\S+)", task_content)
+            action_type_raw = type_match.group(1) if type_match else None
+
+            # Clean up action type (handle "ActionType.INVOICE_GENERATE" format)
+            action_type = None
+            if action_type_raw:
+                # Remove "ActionType." prefix if present
+                if action_type_raw.startswith("ActionType."):
+                    action_type = action_type_raw.replace("ActionType.", "").lower()
+                else:
+                    action_type = action_type_raw.lower()
+
+            # Look for confidence
+            conf_match = re.search(r"\*\*Confidence:\*\*\s*([\d.]+)", task_content)
+            confidence = float(conf_match.group(1).rstrip('%')) / 100 if conf_match else 0.5
+
+            # Look for the JSON action_data in a code block after "Proposed Details"
+            json_match = re.search(
+                r"### Proposed Details\s*```json\s*(\{.*?\})\s*```",
+                task_content,
+                re.DOTALL
+            )
+
+            if not json_match or not action_type:
+                return None
+
+            action_data = json.loads(json_match.group(1))
+
+            # Look for reasoning
+            reasoning_match = re.search(
+                r"### Reasoning\s*(.+?)(?=###|\Z)",
+                task_content,
+                re.DOTALL
+            )
+            reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+
+            return ProposedAction(
+                id=action_id or f"action_{task_content[:20]}",
+                action_type=action_type,
+                title=f"Approved: {action_type}",
+                reasoning=reasoning,
+                action_data=action_data,
+                confidence=confidence,
+                requires_approval=False,  # Already approved
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to parse proposed action: {e}")
+            return None
+
     async def _process_task(self, task_path: Path) -> None:
         """
         Process a single task with Claude Code CLI.
@@ -264,6 +421,17 @@ class Orchestrator:
             task_path: Path to task markdown file
         """
         self.logger.info(f"Processing task: {task_path.name}")
+
+        # Log task processing start to audit
+        self.audit.log(
+            event_type="ralph_task_start",
+            actor="ai",
+            task_id=task_path.stem,
+            details={
+                "summary": f"Ralph starting to process {task_path.name}",
+                "task_file": task_path.name,
+            },
+        )
 
         # Read task file
         with open(task_path, "r", encoding="utf-8") as f:
@@ -274,7 +442,9 @@ class Orchestrator:
 
         # Run Claude Code CLI
         try:
+            self.logger.info(f"Calling Claude Code CLI for {task_path.name}...")
             response_text = await self._call_claude_code(prompt)
+            self.logger.info(f"Claude Code responded for {task_path.name}")
 
             proposed_action = await self._parse_agent_response(response_text)
 
@@ -300,6 +470,20 @@ class Orchestrator:
 
                 # Move to Pending_Approval
                 await self._move_task(task_path, self.settings.vault_pending_approval)
+
+                # Log to audit
+                self.audit.log(
+                    event_type="ralph_task_pending_approval",
+                    actor="ai",
+                    task_id=task_path.stem,
+                    action_id=proposed_action.id,
+                    details={
+                        "summary": f"Task {task_path.name} moved to Pending_Approval",
+                        "action_type": proposed_action.action_type,
+                        "confidence": proposed_action.confidence,
+                        "requires_approval": True,
+                    },
+                )
 
         except Exception as e:
             self.logger.error(f"Error processing task {task_path.name}: {e}")
@@ -331,7 +515,8 @@ class Orchestrator:
             # Run Claude Code with the prompt via stdin
             # Use cwd parameter to set working directory to the vault
             vault_path = str(self.settings.vault_path.resolve())
-            self.logger.debug(f"Running Claude Code in {vault_path}: {' '.join(cmd)}")
+            self.logger.info(f"Running Claude Code CLI in {vault_path}")
+            self.logger.info(f"Prompt length: {len(prompt)} chars, timeout: {self.settings.claude_code_timeout}s")
 
             # Use asyncio to run subprocess without blocking
             process = await asyncio.create_subprocess_exec(
@@ -348,16 +533,20 @@ class Orchestrator:
                 timeout=self.settings.claude_code_timeout
             )
 
+            self.logger.info(f"Claude Code CLI completed with return code: {process.returncode}")
+
             if process.returncode != 0:
                 error_msg = stderr.decode('utf-8') if stderr else "Unknown error"
+                self.logger.error(f"Claude Code stderr: {error_msg[:500]}")
                 raise RuntimeError(f"Claude Code failed: {error_msg}")
 
             response = stdout.decode('utf-8').strip()
-            self.logger.debug(f"Claude Code response length: {len(response)} chars")
+            self.logger.info(f"Claude Code response received: {len(response)} chars")
 
             return response
 
         except asyncio.TimeoutError:
+            self.logger.error(f"Claude Code timed out after {self.settings.claude_code_timeout}s")
             raise RuntimeError(
                 f"Claude Code timed out after {self.settings.claude_code_timeout}s"
             )
@@ -419,6 +608,7 @@ action_data must contain:
 - "body": "Email body text"
 
 ### whatsapp_reply - Reply to a WhatsApp message
+**IMPORTANT: WhatsApp messages ALWAYS require approval (personal account connected)**
 action_data must contain:
 - "body": "The reply message"
 
@@ -438,12 +628,43 @@ action_data must contain:
 - "amount": dollar amount
 - "recipient": "who to pay"
 
-### social_post - Post to social media
+### twitter_post - Post to Twitter/X
+action_data must contain:
+- "content": "tweet text (max 280 chars)"
+- "reply_to_id": (optional) tweet ID to reply to
+
+### social_post - Post to social media (generic)
 action_data must contain:
 - "platform": "linkedin" | "twitter" | "facebook"
 - "content": "post content"
 
+### invoice_generate - Generate and send an invoice
+**IMPORTANT:** Only use this when you have ALL required information (real values, not placeholders).
+action_data must contain:
+- "client_name": "Client's name"
+- "client_email": "client@email.com" (MUST be a real email address)
+- "amount": total amount as a NUMBER (e.g., 500.00, NOT a string or placeholder)
+- "description": "Services description"
+Optional:
+- "items": [{{"description": "...", "quantity": 1, "unit_price": 100}}]
+- "notes": "Additional notes"
+- "send_via_email": true/false (whether to email the invoice)
+- "send_via_whatsapp": true/false (notify via WhatsApp)
+
 ### custom - Any other action
+
+# CRITICAL: Handling Missing Information
+
+**NEVER use placeholder values** like "NEEDS_APPROVAL_REQUIRED", "TBD", "UNKNOWN", etc.
+
+If you don't have enough information to complete an action (e.g., invoice amount, email address):
+1. **Propose a reply action** (whatsapp_reply or email_reply) to ASK the person for the missing details
+2. Explain what information you need in a friendly, professional message
+3. Once they provide the info, a new task will be created that you can then act on
+
+Example: If someone asks "send me an invoice" but you don't know the amount:
+- DON'T propose invoice_generate with placeholder amounts
+- DO propose whatsapp_reply asking: "I'd be happy to send you the invoice! Could you confirm the amount and your email address?"
 
 # Decision Rules
 
@@ -521,7 +742,8 @@ Respond ONLY with the JSON object as specified. No other text.
             return False
 
         # Never auto-approve certain action types
-        never_auto = ["payment", "social_post"]
+        # WhatsApp always requires approval since it's connected to personal account
+        never_auto = ["payment", "social_post", "whatsapp_reply"]
         if action.action_type in never_auto:
             return False
 
@@ -552,10 +774,82 @@ Respond ONLY with the JSON object as specified. No other text.
             elif action_type == "whatsapp_reply":
                 success = await self.whatsapp_mcp.execute_action(action, task_context)
 
+            elif action_type == "twitter_post":
+                success = await self.twitter_mcp.execute_action(action, task_context)
+
             elif action_type == "social_post":
-                # TODO: Implement social media MCP
-                self.logger.warning(f"Social post MCP not yet implemented")
-                success = False
+                # Route to appropriate social media MCP based on platform
+                platform = action.action_data.get("platform", "").lower()
+                if platform == "twitter":
+                    success = await self.twitter_mcp.execute_action(action, task_context)
+                else:
+                    self.logger.warning(f"Social platform '{platform}' not yet implemented")
+                    success = False
+
+            elif action_type == "invoice_generate":
+                # Generate invoice via Invoice MCP
+                result = await self.invoice_mcp.execute_action(action, task_context)
+                success = result.get("success", False)
+
+                if success:
+                    # Store invoice details
+                    invoice_path = result.get("invoice_path")
+                    invoice_number = result.get("invoice_number")
+                    invoice_amount = result.get("total_amount")
+                    delivery_method = result.get("delivery_method", "manual")
+
+                    task_context["generated_invoice_path"] = invoice_path
+                    task_context["invoice_number"] = invoice_number
+                    task_context["invoice_amount"] = invoice_amount
+
+                    # Handle delivery based on method
+                    if delivery_method == "email":
+                        # Send invoice via email
+                        client_email = result.get("client_email")
+                        self.logger.info(f"Sending invoice {invoice_number} to {client_email}")
+                        # Note: Email with attachment would require EmailMCP enhancement
+                        # For now, send notification email
+                        try:
+                            email_action = ProposedAction(
+                                action_type="email_send",
+                                title=f"Invoice {invoice_number}",
+                                reasoning="Auto-generated invoice delivery",
+                                action_data={
+                                    "to": client_email,
+                                    "subject": f"Invoice {invoice_number} - ${invoice_amount:.2f}",
+                                    "body": f"Please find your invoice attached.\n\nInvoice: {invoice_number}\nAmount: ${invoice_amount:.2f}\n\nThank you for your business!",
+                                },
+                                confidence=1.0,
+                            )
+                            await self.email_mcp.execute_action(email_action, task_context)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to email invoice: {e}")
+
+                    elif delivery_method == "whatsapp":
+                        # Send invoice notification via WhatsApp
+                        whatsapp_contact = result.get("whatsapp_contact")
+                        self.logger.info(f"Sending invoice notification to {whatsapp_contact} via WhatsApp")
+                        try:
+                            whatsapp_action = ProposedAction(
+                                action_type="whatsapp_reply",
+                                title=f"Invoice {invoice_number} notification",
+                                reasoning="Auto-generated invoice notification",
+                                action_data={
+                                    "to": whatsapp_contact,
+                                    "body": f"Hi! Your invoice {invoice_number} for ${invoice_amount:.2f} has been generated. Please provide your email address and I'll send it over, or let me know if you'd like to pick it up.",
+                                },
+                                confidence=1.0,
+                            )
+                            await self.whatsapp_mcp.execute_action(whatsapp_action, task_context)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to send WhatsApp notification: {e}")
+
+                    else:
+                        # Manual delivery - just log
+                        self.logger.info(
+                            f"Invoice {invoice_number} generated at {invoice_path}. "
+                            f"Manual delivery required (no email provided)."
+                        )
 
             elif action_type == "file_operation":
                 # File operations are handled directly
@@ -621,13 +915,18 @@ Respond ONLY with the JSON object as specified. No other text.
             content = f.read()
 
         # Append proposed action
+        # Get action type as string (handle both enum and string)
+        action_type_str = action.action_type
+        if hasattr(action_type_str, 'value'):
+            action_type_str = action_type_str.value
+
         action_md = f"""
 ---
 
 ## Proposed Action (Requires Approval)
 
 **Action ID:** {action.id}
-**Type:** {action.action_type}
+**Type:** {action_type_str}
 **Confidence:** {action.confidence:.0%}
 
 ### Reasoning

@@ -34,6 +34,7 @@ class ActionType(str, Enum):
     CALENDAR_EVENT = "calendar_event"
     PAYMENT = "payment"
     SOCIAL_POST = "social_post"
+    INVOICE_GENERATE = "invoice_generate"
     CUSTOM = "custom"
 
 

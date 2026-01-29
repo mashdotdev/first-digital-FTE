@@ -54,6 +54,7 @@ This AI Employee exists to augment my productivity by handling routine tasks, pr
 | Action Type | Auto-Approve Threshold | Always Require Approval |
 |-------------|------------------------|-------------------------|
 | Email Replies | To known contacts in /People | New contacts, bulk sends |
+| WhatsApp Messages | **NEVER** | **ALL MESSAGES** |
 | Payments | **NEVER** | **ALL PAYMENTS** |
 | Social Posts | Scheduled posts matching brand voice | All posts initially |
 | File Operations | Create, read, move within vault | Delete, move outside vault |
